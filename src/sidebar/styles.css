@@ -335,6 +335,80 @@ h1 span {
   overflow-wrap: anywhere;
 }
 
+.url-help {
+  margin-right: auto;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.import-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 9px 10px;
+  border: 1px solid #cfe5d9;
+  border-left: 3px solid #369875;
+  border-radius: 5px;
+  background: #f1f8f4;
+  color: #2b6b52;
+  font-size: 11px;
+  line-height: 1.6;
+  animation: notice-in 160ms ease-out;
+}
+
+.import-message {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.import-warning-title {
+  margin-top: 4px;
+  color: #8a6416;
+}
+
+.import-warnings {
+  margin: 2px 0 0;
+  padding-left: 16px;
+  color: #8a6416;
+}
+
+.import-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.import-actions .text-button {
+  padding: 2px 0;
+  color: #2b6b52;
+  font-size: 11px;
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.import-actions .remove-button {
+  padding: 0;
+  line-height: 1;
+}
+
+@keyframes notice-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .import-notice {
+    animation: none;
+  }
+}
+
 .request-tabs {
   display: flex;
   gap: 3px;
@@ -647,6 +721,14 @@ h2 {
   background: #e8f3ed;
 }
 
+.response-note {
+  margin: -5px 20px 11px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
 .response-tools {
   display: flex;
   justify-content: space-between;
@@ -776,6 +858,11 @@ kbd {
     padding-left: 28px;
   }
 
+  .response-note {
+    margin-left: 28px;
+    margin-right: 28px;
+  }
+
 }
 
 @media (max-width: 330px) {
@@ -825,6 +912,21 @@ kbd {
     color: #f0a39c;
     background: #3c2525;
     border-color: #623434;
+  }
+
+  .import-notice {
+    color: #9fd6bd;
+    background: #1f3129;
+    border-color: #2f4d3f;
+    border-left-color: #4fae88;
+  }
+
+  .import-actions .text-button {
+    color: #9fd6bd;
+  }
+
+  .import-warnings, .import-warning-title {
+    color: #e0bf74;
   }
 
   .response-status {

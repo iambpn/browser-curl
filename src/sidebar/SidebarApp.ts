@@ -1,27 +1,100 @@
 /** The sidebar's request editor and response viewer. */
+import {sendThroughBackground} from './background-client'
+import type {CurlImport} from './curl-import'
 import {buildRequest, formatResponse, formatSize, parseRequestUrl} from './request'
 import type {RequestAuthorization, RequestDraft, RequestEntry} from './request'
 import {loadResponseHeight, saveResponseHeight} from './response-height'
+import type {HeaderPair, HttpRequestPayload} from '../shared/http-messages'
 
-/** Request optional host access with the callback API shared by supported browsers. */
-function requestSiteAccess(origin: string): Promise<boolean> {
-  /** Resolve the permission result or report the browser's permission error. */
-  function requestPermission(
-    resolve: (granted: boolean) => void,
-    reject: (error: Error) => void
-  ): void {
-    /** Read lastError while the permission callback is active. */
-    function onPermission(granted: boolean): void {
-      const error = chrome.runtime.lastError
-      if (error) {
-        reject(new Error(error.message))
-        return
+/** Text that starts with the curl program name, such as `curl https://…` or `curl.exe -X POST …`. */
+const CURL_COMMAND_PATTERN = /^\s*curl(?:\.exe)?\s/i
+
+/** The IDs of every Authorization tab field. Undo restores all of them, not only the selected type. */
+const AUTH_FIELD_IDS = [
+  'bearer-token',
+  'basic-username',
+  'basic-password',
+  'api-key-name',
+  'api-key-value',
+  'api-key-location',
+  'custom-authorization'
+]
+
+/** Every value in the request editor. Undo after a cURL import uses this snapshot. */
+interface EditorState {
+  method: string
+  url: string
+  params: RequestEntry[]
+  headers: RequestEntry[]
+  body: string
+  bodyType: string
+  authType: string
+  authValues: Record<string, string>
+}
+
+/** Return true when pasted or entered text is a cURL command and not a URL. */
+function isCurlCommand(text: string): boolean {
+  return CURL_COMMAND_PATTERN.test(text)
+}
+
+/** Read the Authorization tab fields that store the given authorization. */
+function authorizationFieldValues(authorization: RequestAuthorization): Record<string, string> {
+  switch (authorization.type) {
+    case 'bearer':
+      return {'bearer-token': authorization.token}
+    case 'basic':
+      return {'basic-username': authorization.username, 'basic-password': authorization.password}
+    case 'api-key':
+      return {
+        'api-key-name': authorization.key,
+        'api-key-value': authorization.value,
+        'api-key-location': authorization.location
       }
-      resolve(granted)
-    }
-    chrome.permissions.request({origins: [origin]}, onPermission)
+    case 'custom':
+      return {'custom-authorization': authorization.value}
+    default:
+      return {}
   }
-  return new Promise(requestPermission)
+}
+
+/** Convert imported request values into a full editor snapshot with empty unused auth fields. */
+function editorStateFromDraft(draft: RequestDraft): EditorState {
+  const authValues: Record<string, string> = {'api-key-location': 'header'}
+  for (const id of AUTH_FIELD_IDS) authValues[id] ??= ''
+  const importedValues = authorizationFieldValues(draft.authorization)
+  Object.assign(authValues, importedValues)
+  return {
+    method: draft.method,
+    url: draft.url,
+    params: draft.params,
+    headers: draft.headers,
+    body: draft.body,
+    bodyType: draft.bodyType,
+    authType: draft.authorization.type,
+    authValues
+  }
+}
+
+/** Convert the built fetch() values into plain data for the background script. */
+function toPayload(request: {url: URL; init: RequestInit}): HttpRequestPayload {
+  const headers: HeaderPair[] = []
+  const requestHeaders = request.init.headers as Headers
+  for (const [name, value] of requestHeaders) headers.push([name, value])
+  const body = typeof request.init.body === 'string' ? request.init.body : undefined
+  return {method: request.init.method ?? 'GET', url: request.url.href, headers, body}
+}
+
+/** Show a lowercase header name in its usual form, such as Content-Length for content-length. */
+function displayHeaderName(name: string): string {
+  const words = name.split('-')
+  const capitalized = words.map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+  return capitalized.join('-')
+}
+
+/** Keep the first line of a parser error. Later lines point at the command text with ^ marks. */
+function firstLine(text: string): string {
+  const [line] = text.split('\n')
+  return line.trim()
 }
 
 /** Find a required element in the sidebar template. */
@@ -54,6 +127,12 @@ class SidebarApp {
   private responseStats = element('#response-stats')
   private responseFormat = element<HTMLSelectElement>('#response-format')
   private copy = element<HTMLButtonElement>('#copy-response')
+  private responseNote = element('#response-note')
+  private importNotice = element('#import-notice')
+  private importSummary = element('#import-summary')
+  private importWarnings = element<HTMLUListElement>('#import-warnings')
+  private undoImport = element<HTMLButtonElement>('#undo-import')
+  private stateBeforeImport: EditorState | undefined
   private controller: AbortController | undefined
   private responseBody = ''
   private responseHeaders = ''
@@ -67,6 +146,9 @@ class SidebarApp {
     this.form.addEventListener('submit', this.sendRequest)
     this.send.addEventListener('click', this.handleSendClick)
     this.url.addEventListener('input', this.readUrlParameters)
+    this.url.addEventListener('paste', this.handleUrlPaste)
+    this.undoImport.addEventListener('click', this.undoCurlImport)
+    element('#dismiss-import').addEventListener('click', this.hideImportNotice)
     this.method.addEventListener('change', this.updateMethod)
     this.bodyType.addEventListener('change', this.updateBodyFormat)
     this.form.addEventListener('input', this.handleRowInput)
@@ -150,6 +232,133 @@ class SidebarApp {
     const rows = element('#params-rows')
     if (!rows.children.length) this.addRow('params')
     this.updateCounts()
+  }
+
+  /** Import a pasted cURL command instead of inserting it as URL text. */
+  private handleUrlPaste = (event: ClipboardEvent): void => {
+    const text = event.clipboardData?.getData('text/plain') ?? ''
+    if (!isCurlCommand(text)) return
+    event.preventDefault()
+    void this.importCurl(text)
+  }
+
+  /** Parse a cURL command, fill the editor, and offer Undo for the previous values. */
+  private async importCurl(command: string): Promise<void> {
+    this.error.hidden = true
+    this.showImportNotice('Reading the cURL command…', [], false)
+    let imported: CurlImport
+    let summary: string
+    try {
+      const curlImport = await import('./curl-import')
+      imported = curlImport.importCurlCommand(command)
+      summary = curlImport.describeImport(imported.draft)
+    } catch (error) {
+      this.hideImportNotice()
+      const reason = error instanceof Error ? firstLine(error.message) : ''
+      this.showError(`Could not read the cURL command. ${reason}`.trim())
+      return
+    }
+
+    this.stateBeforeImport = this.readEditorState()
+    this.applyEditorState(editorStateFromDraft(imported.draft))
+    this.showImportNotice(summary, imported.warnings, true)
+    this.showImportedTab(imported.draft)
+    this.url.focus()
+  }
+
+  /** Show the import result. Undo is available only after the editor values change. */
+  private showImportNotice(summary: string, warnings: string[], canUndo: boolean): void {
+    this.importSummary.textContent = summary
+    const uniqueWarnings = new Set(warnings.map(firstLine))
+    const items: HTMLLIElement[] = []
+    for (const warning of uniqueWarnings) {
+      const item = document.createElement('li')
+      item.textContent = warning
+      items.push(item)
+    }
+    this.importWarnings.replaceChildren(...items)
+    this.importWarnings.hidden = items.length === 0
+    element('#import-warning-title').hidden = items.length === 0
+    this.undoImport.hidden = !canUndo
+    this.importNotice.hidden = false
+  }
+
+  /** Hide the import result and forget the Undo snapshot. */
+  private hideImportNotice = (): void => {
+    this.importNotice.hidden = true
+    this.stateBeforeImport = undefined
+  }
+
+  /** Restore the editor values from before the last cURL import. */
+  private undoCurlImport = (): void => {
+    const previous = this.stateBeforeImport
+    this.hideImportNotice()
+    if (!previous) return
+    this.applyEditorState(previous)
+    this.url.focus()
+  }
+
+  /** Open the tab that shows the most important imported values. */
+  private showImportedTab(draft: RequestDraft): void {
+    let tabId = 'params-tab'
+    if (draft.headers.length) tabId = 'headers-tab'
+    if (draft.body) tabId = 'body-tab'
+    this.selectTab(element<HTMLButtonElement>(`#${tabId}`))
+  }
+
+  /** Read every editor value, including auth fields for types that are not selected. */
+  private readEditorState(): EditorState {
+    const authValues: Record<string, string> = {}
+    for (const id of AUTH_FIELD_IDS) {
+      authValues[id] = element<HTMLInputElement | HTMLSelectElement>(`#${id}`).value
+    }
+    return {
+      method: this.method.value,
+      url: this.url.value,
+      params: this.readRows('params'),
+      headers: this.readRows('headers'),
+      body: this.body.value,
+      bodyType: this.bodyType.value,
+      authType: this.authType.value,
+      authValues
+    }
+  }
+
+  /** Replace every editor value and update the dependent labels, counts, and fields. */
+  private applyEditorState(state: EditorState): void {
+    const hasMethod = Array.from(this.method.options).some((option) => option.value === state.method)
+    if (!hasMethod) this.method.add(new Option(state.method))
+    this.method.value = state.method
+    this.url.value = state.url
+    try {
+      this.lastUrlSearch = parseRequestUrl(state.url).search
+    } catch {
+      this.lastUrlSearch = ''
+    }
+    this.replaceRows('params', state.params)
+    this.replaceRows('headers', state.headers)
+    this.body.value = state.body
+    this.bodyType.value = state.bodyType
+    this.authType.value = state.authType
+    for (const id of AUTH_FIELD_IDS) {
+      element<HTMLInputElement | HTMLSelectElement>(`#${id}`).value = state.authValues[id] ?? ''
+    }
+    this.updateMethod()
+    this.updateAuthorization()
+    this.updateCounts()
+  }
+
+  /** Replace one row group. An empty group keeps one blank row for new input. */
+  private replaceRows(group: string, entries: RequestEntry[]): void {
+    element(`#${group}-rows`).replaceChildren()
+    for (const entry of entries) this.addRow(group, entry)
+    if (!entries.length) this.addRow(group)
+  }
+
+  /** Show an error above the request tabs. */
+  private showError(message: string): void {
+    this.error.textContent = message
+    this.error.hidden = false
   }
 
   /** Reflect enabled parameter rows in the URL without losing other URL parts. */
@@ -423,17 +632,22 @@ class SidebarApp {
     this.controller.abort()
   }
 
-  /** Send or cancel a request, requesting access only to its chosen host. */
+  /** Send or cancel a request. A cURL command in the URL field is imported instead of sent. */
   private sendRequest = async (event: SubmitEvent): Promise<void> => {
     event.preventDefault()
     if (this.controller) {
       this.controller.abort()
       return
     }
+    if (isCurlCommand(this.url.value)) {
+      await this.importCurl(this.url.value)
+      return
+    }
     this.error.hidden = true
+    this.hideImportNotice()
     this.setLoading(true)
-    let timeout: ReturnType<typeof setTimeout> | undefined
-    let timedOut = false
+    const controller = new AbortController()
+    this.controller = controller
     try {
       const draft: RequestDraft = {
         method: this.method.value,
@@ -445,58 +659,41 @@ class SidebarApp {
         authorization: this.readAuthorization()
       }
       const request = buildRequest(draft)
-      const controller = new AbortController()
-      this.controller = controller
-      if (typeof chrome !== 'undefined' && chrome.permissions) {
-        const origin = `${request.url.origin}/*`
-        const granted = await requestSiteAccess(origin)
-        if (!granted) {
-          throw new Error('Site access was denied. Allow access to send this request.')
-        }
-      }
-      controller.signal.throwIfAborted()
-      /** Cancel network work if the response takes longer than 30 seconds. */
-      function abortTimedOutRequest(): void {
-        timedOut = true
-        controller.abort()
-      }
-      timeout = setTimeout(abortTimedOutRequest, 30000)
-      const start = performance.now()
-      request.init.signal = controller.signal
-      const response = await fetch(request.url, request.init)
-      const buffer = await response.arrayBuffer()
-      this.responseBody = new TextDecoder().decode(buffer)
-      const headers: string[] = []
-      for (const [key, value] of response.headers) headers.push(`${key}: ${value}`)
+      const payload = toPayload(request)
+      const response = await sendThroughBackground(payload, controller.signal)
+      this.responseBody = response.body
+      const headers = response.headers.map(([key, value]) => `${key}: ${value}`)
       this.responseHeaders = headers.join('\n')
-      const elapsed = performance.now() - start
-      const duration = Math.round(elapsed)
-      const size = formatSize(buffer.byteLength)
       const status = `${response.status} ${response.statusText}`.trim()
       element('#response-status').textContent = status
-      element('#response-status').dataset.success = String(response.ok)
-      element('#response-time').textContent = `${duration} ms`
-      element('#response-size').textContent = size
+      const isSuccess = response.status >= 200 && response.status < 300
+      element('#response-status').dataset.success = String(isSuccess)
+      element('#response-time').textContent = `${response.durationMs} ms`
+      element('#response-size').textContent = formatSize(response.size)
+      this.showSkippedHeaders(response.skippedHeaders)
       this.responseStats.hidden = false
       this.responseEmpty.hidden = true
       this.responseTools.hidden = false
       this.renderResponse()
     } catch (error) {
-      let message = 'Could not send the request. Check the URL, site access, and network connection.'
+      let message = 'Could not send the request. Check the URL and network connection.'
       if (error instanceof Error) message = error.message
-      if (this.controller?.signal.aborted) {
-        message = timedOut ? 'The request timed out after 30 seconds.' : 'Request canceled.'
-      }
-      this.error.textContent = message
-      this.error.hidden = false
+      if (controller.signal.aborted) message = 'Request canceled.'
+      this.showError(message)
       this.responseEmpty.hidden = false
       element('#empty-title').textContent = 'No response received'
       element('#empty-description').textContent = 'Check the request details and try again.'
     } finally {
-      clearTimeout(timeout)
       this.controller = undefined
       this.setLoading(false)
     }
+  }
+
+  /** Tell the user which entered headers the browser controls and did not send. */
+  private showSkippedHeaders(names: string[]): void {
+    const displayNames = names.map(displayHeaderName)
+    this.responseNote.hidden = names.length === 0
+    this.responseNote.textContent = `Not sent, because the browser sets these headers: ${displayNames.join(', ')}.`
   }
 
   /** Reset response state while a request is running and update the send control. */
@@ -507,6 +704,7 @@ class SidebarApp {
     if (!loading) return
     this.copy.textContent = 'Copy'
     this.responseStats.hidden = true
+    this.responseNote.hidden = true
     this.responseTools.hidden = true
     this.responseContent.hidden = true
     element('#response-headers-panel').hidden = true

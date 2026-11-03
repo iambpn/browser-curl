@@ -52,16 +52,23 @@
     "browser_style": false
   },
   "chromium:permissions": [
-    "sidePanel"
+    "sidePanel",
+    "declarativeNetRequestWithHostAccess"
   ],
-  "chromium:optional_host_permissions": [
+  "chromium:host_permissions": [
     "http://*/*",
     "https://*/*"
   ],
-  "firefox:optional_permissions": [
+  "firefox:permissions": [
+    "webRequest",
+    "webRequestBlocking",
     "http://*/*",
     "https://*/*"
   ],
+  "chromium:content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
+  "firefox:content_security_policy": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
   "background": {
     "chromium:service_worker": "background.ts",
     "firefox:scripts": [

@@ -40,11 +40,23 @@
                 <option>PATCH</option><option>DELETE</option><option>HEAD</option><option>OPTIONS</option>
               </select>
               <div class="url-bar">
-                <input id="request-url" type="url" placeholder="https://api.example.com/v1/users" aria-label="Request URL" required spellcheck="false" autocomplete="off" />
+                <input id="request-url" type="text" inputmode="url" placeholder="Enter a URL or paste a cURL command" aria-label="Request URL or cURL command" aria-describedby="url-help" required spellcheck="false" autocomplete="off" />
               </div>
             </div>
             <div class="request-actions">
+              <span id="url-help" class="url-help">Paste a cURL command to fill in the request.</span>
               <button id="send-request" class="send-button" type="submit">Send</button>
+            </div>
+            <div id="import-notice" class="import-notice" role="status" hidden>
+              <div class="import-message">
+                <p id="import-summary"></p>
+                <p id="import-warning-title" class="import-warning-title" hidden>The editor did not use these parts of the command:</p>
+                <ul id="import-warnings" class="import-warnings" aria-labelledby="import-warning-title" hidden></ul>
+              </div>
+              <div class="import-actions">
+                <button id="undo-import" class="text-button" type="button">Undo</button>
+                <button id="dismiss-import" class="remove-button" type="button" aria-label="Dismiss import message" title="Dismiss">×</button>
+              </div>
             </div>
             <p id="request-error" class="request-error" role="alert" hidden></p>
 
@@ -64,7 +76,7 @@
               <section id="headers-panel" role="tabpanel" aria-labelledby="headers-tab" hidden>
                 <div class="panel-heading"><h2>Request headers</h2><button class="text-button add-button" type="button" data-add="headers">+ Add</button></div>
                 <div class="entry-table"><div class="entry-heading" aria-hidden="true"><span></span><span>KEY</span><span>VALUE</span><span></span></div><div id="headers-rows"></div></div>
-                <p class="help-text">The browser controls restricted headers such as Host and Cookie.</p>
+                <p class="help-text">Cookie, Origin, Referer, and User-Agent are sent as you enter them. The browser sets Host, Content-Length, and Connection.</p>
               </section>
               <section id="body-panel" role="tabpanel" aria-labelledby="body-tab" hidden>
                 <div class="panel-heading"><h2>Request body</h2><select id="body-type" class="compact-select" aria-label="Body format"><option value="json">JSON</option><option value="text">Text</option></select></div>
@@ -128,6 +140,7 @@
         <section id="response-section" class="response-section" aria-label="Response" aria-busy="false">
           <div class="response-heading"><h2>Response</h2><span class="response-label">SERVER OUTPUT</span></div>
           <div id="response-stats" class="response-stats" role="status" hidden><span id="response-status" class="response-status"></span><span id="response-time"></span><span id="response-size"></span></div>
+          <p id="response-note" class="response-note" hidden></p>
           <div id="response-tools" class="response-tools" hidden>
             <div id="response-tabs" class="response-tabs" role="tablist" aria-label="Response view">
               <button id="response-body-tab" type="button" role="tab" aria-selected="true" aria-controls="response-content" data-response="body">Body</button>
@@ -138,7 +151,7 @@
           <div id="response-empty" class="response-empty">
             <div class="empty-icon" aria-hidden="true"><svg width="34" height="34" viewBox="0 0 34 34" fill="none"><path d="M12 10 5 17l7 7m10-14 7 7-7 7M19 7l-4 20" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg></div>
             <h3 id="empty-title">Ready when you are</h3>
-            <p id="empty-description">Enter a URL and hit Send.<br />Your response will appear here.</p>
+            <p id="empty-description">Enter a URL or paste a cURL command, then hit Send.<br />Your response will appear here.</p>
           </div>
           <pre id="response-content" role="tabpanel" aria-labelledby="response-body-tab" tabindex="0" hidden></pre>
           <pre id="response-headers-panel" role="tabpanel" aria-labelledby="response-headers-tab" tabindex="0" hidden></pre>
