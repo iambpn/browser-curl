@@ -1,0 +1,4 @@
+# The extension uses curlconverter's WASM parser, so the native Node builds are not needed.
+allowBuilds:
+  tree-sitter: false
+  tree-sitter-bash: false

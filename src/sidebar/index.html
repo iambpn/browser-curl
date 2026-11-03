@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" type="image/png" href="../images/icon-32.png" />
+    <title>Browser Curl · Request</title>
+  </head>
+  <body>
+    <noscript>Enable JavaScript to use the request editor.</noscript>
+    <div id="root" class="sidebar-app">
+      <header class="app-header">
+        <div class="brand" aria-label="Browser Curl">
+          <img class="brand-icon" src="../images/icon.svg" alt="" aria-hidden="true" />
+          <span>browser<span class="brand-light">curl</span></span>
+        </div>
+      </header>
+
+      <main>
+        <div class="request-heading">
+          <div class="request-label">
+            <span id="request-method-label">GET</span>
+            <button id="request-name" class="request-name" type="button" title="Rename request">Untitled request</button>
+            <input id="request-name-input" class="request-name-input" aria-label="Request name" maxlength="120" autocomplete="off" hidden />
+          </div>
+          <span class="draft-label">Draft</span>
+        </div>
+
+        <section id="request-section" class="request-section" aria-label="Request editor">
+          <div class="section-intro">
+            <h1>Make a request<span>.</span></h1>
+            <p>Your API, a little closer.</p>
+          </div>
+          <form id="request-form">
+            <label class="field-label" for="request-url">Request URL</label>
+            <div class="request-address">
+              <select id="request-method" class="compact-select" aria-label="HTTP method">
+                <option>GET</option><option>POST</option><option>PUT</option>
+                <option>PATCH</option><option>DELETE</option><option>HEAD</option><option>OPTIONS</option>
+              </select>
+              <div class="url-bar">
+                <input id="request-url" type="url" placeholder="https://api.example.com/v1/users" aria-label="Request URL" required spellcheck="false" autocomplete="off" />
+              </div>
+            </div>
+            <div class="request-actions">
+              <button id="send-request" class="send-button" type="submit">Send</button>
+            </div>
+            <p id="request-error" class="request-error" role="alert" hidden></p>
+
+            <div class="request-tabs" role="tablist" aria-label="Request options">
+              <button id="params-tab" type="button" role="tab" aria-selected="true" aria-controls="params-panel">Params <span id="params-count" class="count" hidden>0</span></button>
+              <button id="headers-tab" type="button" role="tab" aria-selected="false" aria-controls="headers-panel" tabindex="-1">Headers <span id="headers-count" class="count" hidden>0</span></button>
+              <button id="body-tab" type="button" role="tab" aria-selected="false" aria-controls="body-panel" tabindex="-1">Body</button>
+              <button id="auth-tab" type="button" role="tab" aria-selected="false" aria-controls="auth-panel" tabindex="-1">Authorization</button>
+            </div>
+
+            <div class="request-panels">
+              <section id="params-panel" role="tabpanel" aria-labelledby="params-tab">
+                <div class="panel-heading"><h2>Query parameters</h2><button class="text-button add-button" type="button" data-add="params">+ Add</button></div>
+                <div class="entry-table"><div class="entry-heading" aria-hidden="true"><span></span><span>KEY</span><span>VALUE</span><span></span></div><div id="params-rows"></div></div>
+                <p class="help-text">Parameters are added to your request URL.</p>
+              </section>
+              <section id="headers-panel" role="tabpanel" aria-labelledby="headers-tab" hidden>
+                <div class="panel-heading"><h2>Request headers</h2><button class="text-button add-button" type="button" data-add="headers">+ Add</button></div>
+                <div class="entry-table"><div class="entry-heading" aria-hidden="true"><span></span><span>KEY</span><span>VALUE</span><span></span></div><div id="headers-rows"></div></div>
+                <p class="help-text">The browser controls restricted headers such as Host and Cookie.</p>
+              </section>
+              <section id="body-panel" role="tabpanel" aria-labelledby="body-tab" hidden>
+                <div class="panel-heading"><h2>Request body</h2><select id="body-type" class="compact-select" aria-label="Body format"><option value="json">JSON</option><option value="text">Text</option></select></div>
+                <p id="body-note" class="body-note" role="status">GET requests do not send a body. Select POST, PUT, PATCH, DELETE, or OPTIONS to enable the editor.</p>
+                <textarea id="request-body" aria-label="Request body" aria-describedby="body-note body-content-type" placeholder="GET requests do not send a body." spellcheck="false" disabled></textarea>
+                <p id="body-content-type" class="help-text">Default Content-Type: application/json. A Content-Type in the Headers tab overrides this value.</p>
+              </section>
+              <section id="auth-panel" role="tabpanel" aria-labelledby="auth-tab" hidden>
+                <div class="panel-heading"><h2>Authorization</h2></div>
+                <div class="auth-layout">
+                  <div class="auth-type-column">
+                    <label class="field-label" for="auth-type">Type</label>
+                    <select id="auth-type" class="auth-input">
+                      <option value="none">No auth</option>
+                      <option value="bearer" selected>Bearer token</option>
+                      <option value="basic">Basic auth</option>
+                      <option value="api-key">API key</option>
+                      <option value="custom">Custom Authorization header</option>
+                    </select>
+                  </div>
+                  <div class="auth-details">
+                    <div data-auth-type="none" class="auth-fields" hidden>
+                      <p class="help-text">No credentials are added. You can still set an Authorization header in the Headers tab.</p>
+                    </div>
+                    <div data-auth-type="bearer" class="auth-fields">
+                      <label class="field-label" for="bearer-token">Token</label>
+                      <input id="bearer-token" class="auth-input" type="password" placeholder="Enter your access token" autocomplete="off" spellcheck="false" />
+                      <p class="help-text">Sent as an Authorization: Bearer header.</p>
+                    </div>
+                    <div data-auth-type="basic" class="auth-fields" hidden>
+                      <label class="field-label" for="basic-username">Username</label>
+                      <input id="basic-username" class="auth-input" type="text" placeholder="Username" autocomplete="off" spellcheck="false" />
+                      <label class="field-label" for="basic-password">Password</label>
+                      <input id="basic-password" class="auth-input" type="password" placeholder="Password" autocomplete="off" />
+                      <p class="help-text">Sent as an Authorization: Basic header. Use HTTPS to protect your credentials.</p>
+                    </div>
+                    <div data-auth-type="api-key" class="auth-fields" hidden>
+                      <label class="field-label" for="api-key-name">Key name</label>
+                      <input id="api-key-name" class="auth-input" type="text" placeholder="X-API-Key" autocomplete="off" spellcheck="false" />
+                      <label class="field-label" for="api-key-value">Value</label>
+                      <input id="api-key-value" class="auth-input" type="password" placeholder="Enter your API key" autocomplete="off" spellcheck="false" />
+                      <label class="field-label" for="api-key-location">Add to</label>
+                      <select id="api-key-location" class="auth-input"><option value="header">Header</option><option value="query">Query parameters</option></select>
+                      <p class="help-text">Query keys appear in the request URL. Use a header if your API supports it.</p>
+                    </div>
+                    <div data-auth-type="custom" class="auth-fields" hidden>
+                      <label class="field-label" for="custom-authorization">Authorization value</label>
+                      <input id="custom-authorization" class="auth-input" type="password" placeholder="Token your-token" autocomplete="off" spellcheck="false" />
+                      <p class="help-text">Enter the complete value, including the scheme, such as Token your-token.</p>
+                    </div>
+                  </div>
+                </div>
+                <p class="help-text">Credentials stay in this panel session. The selected type overrides matching headers or query parameters.</p>
+              </section>
+            </div>
+          </form>
+        </section>
+
+        <div id="response-resizer" class="response-resizer" role="separator" tabindex="0" aria-label="Resize response panel" aria-orientation="horizontal" aria-controls="response-section" aria-valuemin="140" aria-valuemax="1000" aria-valuenow="250" aria-describedby="resize-help"><span aria-hidden="true"></span></div>
+        <span id="resize-help" class="sr-only">Drag or use the up and down arrow keys to resize the response. Home shrinks it. End expands it.</span>
+        <section id="response-section" class="response-section" aria-label="Response" aria-busy="false">
+          <div class="response-heading"><h2>Response</h2><span class="response-label">SERVER OUTPUT</span></div>
+          <div id="response-stats" class="response-stats" role="status" hidden><span id="response-status" class="response-status"></span><span id="response-time"></span><span id="response-size"></span></div>
+          <div id="response-tools" class="response-tools" hidden>
+            <div id="response-tabs" class="response-tabs" role="tablist" aria-label="Response view">
+              <button id="response-body-tab" type="button" role="tab" aria-selected="true" aria-controls="response-content" data-response="body">Body</button>
+              <button id="response-headers-tab" type="button" role="tab" aria-selected="false" aria-controls="response-headers-panel" data-response="headers" tabindex="-1">Headers</button>
+            </div>
+            <div class="response-actions"><select id="response-format" class="compact-select" aria-label="Response format"><option value="pretty">Pretty</option><option value="raw">Raw</option></select><button id="copy-response" type="button" class="text-button">Copy</button></div>
+          </div>
+          <div id="response-empty" class="response-empty">
+            <div class="empty-icon" aria-hidden="true"><svg width="34" height="34" viewBox="0 0 34 34" fill="none"><path d="M12 10 5 17l7 7m10-14 7 7-7 7M19 7l-4 20" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg></div>
+            <h3 id="empty-title">Ready when you are</h3>
+            <p id="empty-description">Enter a URL and hit Send.<br />Your response will appear here.</p>
+          </div>
+          <pre id="response-content" role="tabpanel" aria-labelledby="response-body-tab" tabindex="0" hidden></pre>
+          <pre id="response-headers-panel" role="tabpanel" aria-labelledby="response-headers-tab" tabindex="0" hidden></pre>
+        </section>
+      </main>
+      <footer><span><kbd>Ctrl / ⌘</kbd> <kbd>↵</kbd> to send</span></footer>
+    </div>
+    <template id="entry-template"><div class="entry-row"><input type="checkbox" data-field="enabled" checked /><input type="text" data-field="key" placeholder="Key" spellcheck="false" autocomplete="off" /><input type="text" data-field="value" placeholder="Value" spellcheck="false" autocomplete="off" /><button type="button" data-remove class="remove-button" title="Remove row">×</button></div></template>
+    <script type="module" src="./scripts.ts"></script>
+  </body>
+</html>
