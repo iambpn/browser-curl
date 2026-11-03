@@ -139,14 +139,27 @@
         <span id="resize-help" class="sr-only">Drag or use the up and down arrow keys to resize the response. Home shrinks it. End expands it.</span>
         <section id="response-section" class="response-section" aria-label="Response" aria-busy="false">
           <div class="response-heading"><h2>Response</h2><span class="response-label">SERVER OUTPUT</span></div>
-          <div id="response-stats" class="response-stats" role="status" hidden><span id="response-status" class="response-status"></span><span id="response-time"></span><span id="response-size"></span></div>
+          <div id="response-stats" class="response-stats" role="status" hidden>
+            <span class="response-stat"><span class="response-stat-label">Status</span><span id="response-status" class="response-status"></span></span>
+            <span class="response-stat" title="Total time to receive the headers and body"><span class="response-stat-label">Time</span><span id="response-time"></span></span>
+            <span class="response-stat" title="Response body size after decompression"><span class="response-stat-label">Body</span><span id="response-size"></span></span>
+            <span class="response-stat response-content-type"><span class="response-stat-label">Type</span><span id="response-type"></span></span>
+            <span class="response-stat"><span class="response-stat-label">Headers</span><span id="response-header-count"></span></span>
+            <span class="response-stat response-url"><span class="response-stat-label">Final URL</span><span id="response-url" class="response-stat-value"></span></span>
+          </div>
           <p id="response-note" class="response-note" hidden></p>
           <div id="response-tools" class="response-tools" hidden>
             <div id="response-tabs" class="response-tabs" role="tablist" aria-label="Response view">
               <button id="response-body-tab" type="button" role="tab" aria-selected="true" aria-controls="response-content" data-response="body">Body</button>
               <button id="response-headers-tab" type="button" role="tab" aria-selected="false" aria-controls="response-headers-panel" data-response="headers" tabindex="-1">Headers</button>
             </div>
-            <div class="response-actions"><select id="response-format" class="compact-select" aria-label="Response format"><option value="pretty">Pretty</option><option value="raw">Raw</option></select><button id="copy-response" type="button" class="text-button">Copy</button></div>
+            <div class="response-actions">
+              <select id="response-format" class="compact-select" aria-label="Response format"><option value="pretty">Pretty</option><option value="raw">Raw</option></select>
+              <button id="copy-response" type="button" class="text-button copy-response" title="Copy the visible response">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="13" rx="2" /><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" /></svg>
+                <span id="copy-response-label" aria-live="polite">Copy</span>
+              </button>
+            </div>
           </div>
           <div id="response-empty" class="response-empty">
             <div class="empty-icon" aria-hidden="true"><svg width="34" height="34" viewBox="0 0 34 34" fill="none"><path d="M12 10 5 17l7 7m10-14 7 7-7 7M19 7l-4 20" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg></div>

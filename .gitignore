@@ -37,3 +37,6 @@ extension-env.d.ts
 .env*
 !.env.example
 !.env.*.example
+
+.claude/demo
+.claude/screenshots

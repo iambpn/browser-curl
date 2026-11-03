@@ -4,7 +4,7 @@ import type {CurlImport} from './curl-import'
 import {buildRequest, formatResponse, formatSize, parseRequestUrl} from './request'
 import type {RequestAuthorization, RequestDraft, RequestEntry} from './request'
 import {loadResponseHeight, saveResponseHeight} from './response-height'
-import type {HeaderPair, HttpRequestPayload} from '../shared/http-messages'
+import type {HeaderPair, HttpRequestPayload, HttpResponsePayload} from '../shared/http-messages'
 
 /** Text that starts with the curl program name, such as `curl https://…` or `curl.exe -X POST …`. */
 const CURL_COMMAND_PATTERN = /^\s*curl(?:\.exe)?\s/i
@@ -127,6 +127,7 @@ class SidebarApp {
   private responseStats = element('#response-stats')
   private responseFormat = element<HTMLSelectElement>('#response-format')
   private copy = element<HTMLButtonElement>('#copy-response')
+  private copyLabel = element('#copy-response-label')
   private responseNote = element('#response-note')
   private importNotice = element('#import-notice')
   private importSummary = element('#import-summary')
@@ -664,12 +665,7 @@ class SidebarApp {
       this.responseBody = response.body
       const headers = response.headers.map(([key, value]) => `${key}: ${value}`)
       this.responseHeaders = headers.join('\n')
-      const status = `${response.status} ${response.statusText}`.trim()
-      element('#response-status').textContent = status
-      const isSuccess = response.status >= 200 && response.status < 300
-      element('#response-status').dataset.success = String(isSuccess)
-      element('#response-time').textContent = `${response.durationMs} ms`
-      element('#response-size').textContent = formatSize(response.size)
+      this.renderResponseStats(response)
       this.showSkippedHeaders(response.skippedHeaders)
       this.responseStats.hidden = false
       this.responseEmpty.hidden = true
@@ -689,6 +685,30 @@ class SidebarApp {
     }
   }
 
+  /** Show response metadata as text, including the complete content type and final URL in tooltips. */
+  private renderResponseStats(response: HttpResponsePayload): void {
+    const status = `${response.status} ${response.statusText}`.trim()
+    element('#response-status').textContent = status
+    const isSuccess = response.status >= 200 && response.status < 300
+    element('#response-status').dataset.success = String(isSuccess)
+    element('#response-time').textContent = `${response.durationMs} ms`
+    element('#response-size').textContent = formatSize(response.size)
+    element('#response-header-count').textContent = String(response.headers.length)
+
+    let contentType = ''
+    for (const [name, value] of response.headers) {
+      if (name.toLowerCase() === 'content-type') contentType = value
+    }
+    const [mediaType] = contentType.split(';')
+    const typeElement = element('#response-type')
+    typeElement.textContent = mediaType.trim() || 'Not provided'
+    typeElement.title = contentType || 'The server did not send a Content-Type header.'
+
+    const urlElement = element('#response-url')
+    urlElement.textContent = response.url
+    urlElement.title = response.url
+  }
+
   /** Tell the user which entered headers the browser controls and did not send. */
   private showSkippedHeaders(names: string[]): void {
     const displayNames = names.map(displayHeaderName)
@@ -702,7 +722,7 @@ class SidebarApp {
     this.send.classList.toggle('is-loading', loading)
     element('#response-section').setAttribute('aria-busy', String(loading))
     if (!loading) return
-    this.copy.textContent = 'Copy'
+    this.copyLabel.textContent = 'Copy'
     this.responseStats.hidden = true
     this.responseNote.hidden = true
     this.responseTools.hidden = true
@@ -733,7 +753,7 @@ class SidebarApp {
     this.responseContent.hidden = this.responseTab !== 'body'
     element('#response-headers-panel').hidden = this.responseTab !== 'headers'
     this.responseFormat.hidden = this.responseTab !== 'body'
-    this.copy.textContent = 'Copy'
+    this.copyLabel.textContent = 'Copy'
   }
 
   /** Copy the visible response text and report clipboard failures in the button. */
@@ -743,9 +763,9 @@ class SidebarApp {
     const text = this.responseTab === 'headers' ? this.responseHeaders : body
     try {
       await navigator.clipboard.writeText(text)
-      this.copy.textContent = 'Copied'
+      this.copyLabel.textContent = 'Copied'
     } catch {
-      this.copy.textContent = 'Copy failed'
+      this.copyLabel.textContent = 'Copy failed'
     }
   }
 

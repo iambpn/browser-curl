@@ -702,11 +702,44 @@ h2 {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px 16px;
   padding: 0 20px 13px;
   font: 10px ui-monospace, SFMono-Regular, Consolas, monospace;
   color: var(--muted);
   flex-shrink: 0;
+}
+
+.response-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text);
+}
+
+.response-stat-label {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.response-content-type {
+  max-width: 100%;
+}
+
+.response-content-type > :last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.response-url {
+  flex-basis: 100%;
+}
+
+.response-stat-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .response-status {
@@ -758,6 +791,17 @@ h2 {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.copy-response {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.copy-response svg {
+  flex-shrink: 0;
 }
 
 .response-empty {
@@ -856,6 +900,7 @@ kbd {
 
   .response-stats {
     padding-left: 28px;
+    padding-right: 28px;
   }
 
   .response-note {
