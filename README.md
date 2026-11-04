@@ -32,7 +32,7 @@ The panel does not show binary bodies, such as images or PDF files, and history 
 
 Drafts and history stay in local extension storage, including credentials and response bodies. They are not synced to another device. History stays until you delete it, it becomes one of more than 100 requests, or you remove the extension. The history list reads only a small index, so it does not load response bodies. The extension requests `storage` and `unlimitedStorage` permissions, because 100 responses of up to the history body limit can be larger than the default extension storage quota. The browser stopping or restarting interrupts running requests.
 
-## Commands
+## Development Commands
 
 ### dev
 
