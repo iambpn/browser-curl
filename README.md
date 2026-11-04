@@ -13,6 +13,72 @@ A REST API client in the browser sidebar for Chromium and Firefox. Send HTTP req
 - **Panel controls:** Resize the response area and send requests with **Ctrl+Enter** or **Command+Enter**.
 - **Size settings:** Limit response downloads and choose which response bodies history saves.
 
+## Install release packages
+
+Download the package for your browser from [GitHub Releases](https://github.com/iambpn/browser-curl/releases).
+ZIP files contain unpacked builds. Firefox `-unsigned.xpi` files have no Mozilla signature. Chrome `-self-signed.crx` files use a local signing key.
+
+### Chrome
+
+#### Install the ZIP
+
+1. Extract the Chromium ZIP into a folder you can keep on your computer.
+2. Open `chrome://extensions` in Chrome.
+3. Turn on **Developer mode**.
+4. Select **Load unpacked**.
+5. Select the extracted folder that contains `manifest.json`.
+6. Open Chrome's extensions menu and pin **browsercurl** for easy access.
+
+Keep the extracted folder after installation. Select the browsercurl toolbar icon to open the sidebar.
+See [Chrome's installation guide](https://developer.chrome.com/docs/extensions/get-started/tutorial/hello-world#load-unpacked) for more details.
+
+#### Install the CRX
+
+On Linux, Chrome permits manual installation of locally signed CRX packages:
+
+1. Download the `-chromium-self-signed.crx` file.
+2. Open `chrome://extensions` and turn on **Developer mode**.
+3. Drag the CRX file onto that page.
+4. Review the permissions and confirm the installation if Chrome allows it.
+
+Standard Chrome on Windows and macOS restricts installation outside the Chrome Web Store to enterprise-managed environments.
+Use the ZIP instructions above for local development on those platforms.
+A self-signed CRX is not Chrome Web Store signed. See [Chrome's distribution rules](https://developer.chrome.com/docs/extensions/how-to/distribute).
+
+### Firefox
+
+#### Temporary installation
+
+Standard Firefox Release blocks normal installation of unsigned XPI files. Load the unsigned XPI or ZIP temporarily for testing:
+
+1. Open `about:debugging` in Firefox.
+2. Select **This Firefox**.
+3. Select **Load Temporary Add-on**.
+4. Select the downloaded `-firefox-unsigned.xpi` or Firefox ZIP. You can also extract the ZIP and select its `manifest.json` file.
+5. Select the browsercurl toolbar icon to open the sidebar.
+
+Firefox removes the temporary installation when you restart the browser. Repeat these steps to load it again.
+See [Firefox's temporary installation guide](https://extensionworkshop.com/documentation/develop/temporary-installation-in-firefox/) for more details.
+
+#### Persistent installation for development
+
+Firefox Developer Edition, Nightly, and ESR support unsigned installation when signature checks are disabled.
+This approach does not work in standard Firefox Release or Beta.
+
+For guidance, see [Installing unsigned extensions permanently to Firefox Developer edition](https://wiringbits.net/browser-extensions/2020/11/27/installing-unsigned-extensions-permanently-to-firefox.html/).
+The article includes an update explaining the Firefox Release limitation.
+Check [Mozilla's Firefox edition guide](https://extensionworkshop.com/documentation/develop/choosing-a-firefox-version-for-extension-development/) for supported development versions.
+
+In a separate development profile on a supported Firefox edition:
+
+1. Open `about:config`.
+2. Set `xpinstall.signatures.required` to `false`.
+3. Open `about:addons` and select **Install Add-on From File** from the gear menu.
+4. Select the `-firefox-unsigned.xpi` file and confirm the installation.
+
+Disabling signature checks affects every extension in that profile. Re-enabling checks can disable unsigned extensions.
+For normal Firefox Release installation, use a Mozilla-signed XPI. See [Mozilla's signing guide](https://extensionworkshop.com/documentation/publish/signing-and-distribution-overview/).
+
 ## Usage
 
 1. Select the extension toolbar icon to open the sidebar.
@@ -103,6 +169,75 @@ pnpm preview --browser=firefox
 
 The build compresses the Bash grammar as `tree-sitter-bash.wasm.gz`.
 The sidebar loads and decompresses this asset only during cURL import. The parser JavaScript and WebAssembly files ship inside the extension.
+
+### Create unsigned XPI and self-signed CRX packages
+
+The packaging script uses existing files. It does not rebuild the application or upload release assets.
+
+By default, it reads `dist/releases/browsercurl-<version>-firefox.zip` and the build in `dist/chromium/`.
+The version comes from `package.json` for the default ZIP path and from the Chromium manifest for the CRX filename.
+Create the Firefox ZIP first. Run `pnpm build` if you need a fresh Chromium build.
+
+```bash
+pnpm package:firefox      # Convert the existing Firefox ZIP to an unsigned XPI
+pnpm package:chrome       # Package the existing Chromium build as a self-signed CRX
+pnpm package:extensions   # Create both packages
+```
+
+To choose an existing ZIP or a different Chromium build directory, pass its path:
+
+```bash
+pnpm package:firefox /path/to/firefox.zip
+pnpm package:chrome /path/to/chromium-build
+```
+
+Packages are written to `dist/releases/`. The XPI name appends `-unsigned.xpi` to the ZIP's base name without changing its contents.
+The CRX is named `browsercurl-<version>-chromium-self-signed.crx`. A valid CRX requires a cryptographic signature, even for local distribution.
+
+Chrome or Chromium must be installed for CRX packaging. The script uses the `google-chrome` executable by default.
+Set `CHROME_BINARY` when your executable has another name or path:
+
+```bash
+CHROME_BINARY=/usr/bin/chromium pnpm package:chrome
+```
+
+The first Chrome packaging attempt creates `.keys/chromium.pem` if no key exists. Later attempts reuse it to preserve the extension ID.
+This directory is ignored by Git. Keep a private backup of the key and never include it in release uploads.
+Set `CRX_KEY_PATH` to use another key location. The script creates a key there if it does not exist.
+Store custom keys outside build, release, and cleanup folders. The script rejects keys inside build or release folders, including through symbolic links.
+
+```bash
+CRX_KEY_PATH=/private/path/chromium.pem pnpm package:chrome
+```
+
+The script validates the Firefox ZIP and rejects archives with signing metadata or a nested manifest.
+Each completed package replaces an earlier file with the same name. A failure while creating a package preserves its earlier file.
+Use files from the release's tagged commit when preparing assets for an existing release.
+
+### Clean generated files
+
+Preview the folders that cleanup will remove:
+
+```bash
+pnpm clean:dry-run
+```
+
+Stop development and test commands before cleaning. Then remove the generated folders:
+
+```bash
+pnpm clean
+```
+
+Cleanup removes these folders when present:
+
+- `dist/`: Browser builds, release ZIP/XPI/CRX files, and development browser profiles.
+- `.playwright/`: Test reports and failure output.
+- `coverage/`: Generated test coverage reports.
+- `.extension-js/`: Local Extension.js session state.
+
+Keep copies of release packages you still need before cleaning.
+Cleanup preserves `.keys/`, `node_modules/`, source files, and project configuration. The Chrome signing key stays available for future packages.
+The script removes symbolic links at generated-folder paths without following them to other directories.
 
 ### Checks and tests
 

@@ -9,6 +9,9 @@ coverage
 # production
 dist
 
+# Local Chrome package signing keys
+.keys/
+
 # misc
 .DS_Store
 

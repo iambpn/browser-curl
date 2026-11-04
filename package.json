@@ -9,6 +9,7 @@
     "@playwright/test": "1.64.1",
     "@types/chrome": "^0.0.287",
     "extension": "^4.1.35",
+    "fflate": "0.8.3",
     "typescript": "7.0.2"
   },
   "scripts": {
@@ -21,7 +22,12 @@
     "preview": "extension preview",
     "build:chrome": "extension build --browser chrome",
     "build:firefox": "extension build --browser firefox",
-    "build:edge": "extension build --browser edge"
+    "build:edge": "extension build --browser edge",
+    "package:extensions": "node scripts/package-extensions.mjs",
+    "package:firefox": "node scripts/package-extensions.mjs firefox",
+    "package:chrome": "node scripts/package-extensions.mjs chrome",
+    "clean": "node scripts/clean.mjs",
+    "clean:dry-run": "node scripts/clean.mjs --dry-run"
   },
   "dependencies": {
     "curlconverter": "^4.12.0",
