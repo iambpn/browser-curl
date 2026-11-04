@@ -1,0 +1,4 @@
+interface:
+  display_name: "Release browsercurl"
+  short_description: "Build and publish browsercurl release packages"
+  default_prompt: "Use $release-browsercurl to prepare and publish a browsercurl release."

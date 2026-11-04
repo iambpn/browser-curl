@@ -239,6 +239,13 @@ Keep copies of release packages you still need before cleaning.
 Cleanup preserves `.keys/`, `node_modules/`, source files, and project configuration. The Chrome signing key stays available for future packages.
 The script removes symbolic links at generated-folder paths without following them to other directories.
 
+### Release workflow
+
+Use the repository's [release-browsercurl skill](.agents/skills/release-browsercurl/SKILL.md) to prepare and publish a release.
+Invoke it as `$release-browsercurl` and provide a version, or let it select the next unused patch version.
+The workflow cleans generated files, rebuilds both browsers, runs tests, and prepares ZIP, unsigned XPI, self-signed CRX, and checksum files.
+It also checks source provenance, preserves the Chrome signing key, and verifies the uploaded release assets.
+
 ### Checks and tests
 
 Run the TypeScript check and unit tests:
