@@ -2,6 +2,7 @@
 import {readFileSync} from 'node:fs'
 import {createRequire} from 'node:module'
 import {dirname, join} from 'node:path'
+import {gzipSync} from 'node:zlib'
 
 // Extension.js uses a fresh profile on every run.
 // Prefer that default? Remove the profile config below.
@@ -9,32 +10,35 @@ const profile = (name) => `./dist/extension-profile-${name}`
 
 const require = createRequire(import.meta.url)
 const curlconverterEntry = require.resolve('curlconverter')
-const curlconverterRequire = createRequire(curlconverterEntry)
-const webTreeSitterEntry = curlconverterRequire.resolve('web-tree-sitter')
+const webTreeSitterEntry = require.resolve('web-tree-sitter')
+const browserParserEntry = join(dirname(curlconverterEntry), 'shell', 'webParser.js')
+const compressedParserEntry = join(import.meta.dirname, 'src', 'requests', 'curl-parser.ts')
 
 /**
- * WebAssembly files that curlconverter loads from the extension root, as "/tree-sitter.wasm" and "/tree-sitter-bash.wasm".
- * The keys are output names, and the values are the source paths in node_modules.
+ * Parser assets at the extension root. tree-sitter.wasm initializes the parser runtime.
+ * tree-sitter-bash.wasm.gz holds the compressed Bash grammar, which the browser decompresses only during cURL import.
+ * The keys are output names, and the values are the uncompressed source paths in node_modules.
  */
 const curlParserFiles = {
   'tree-sitter.wasm': join(dirname(webTreeSitterEntry), 'tree-sitter.wasm'),
-  'tree-sitter-bash.wasm': join(dirname(curlconverterEntry), '..', 'tree-sitter-bash.wasm')
+  'tree-sitter-bash.wasm.gz': join(dirname(curlconverterEntry), '..', 'tree-sitter-bash.wasm')
 }
 
-/** Rspack plugin that adds the cURL parser's WebAssembly files to the root of each build. */
+/** Add the parser runtime and compressed Bash grammar to the root of each build. */
 class CurlParserFilesPlugin {
   /** Add the files when the compiler creates the build assets. */
   apply(compiler) {
     const {Compilation, sources} = compiler.webpack
     const name = 'CurlParserFilesPlugin'
 
-    /** Add each WebAssembly file as an asset of the current compilation. */
+    /** Register the parser assets for the current compilation. */
     function addParserFiles(compilation) {
-      /** Read each file from node_modules and add it to the build output. */
+      /** Read each parser file, compress the grammar, and add the asset to the build output. */
       function emitParserFiles() {
         for (const [outputName, sourcePath] of Object.entries(curlParserFiles)) {
           const content = readFileSync(sourcePath)
-          compilation.emitAsset(outputName, new sources.RawSource(content))
+          const output = outputName.endsWith('.gz') ? gzipSync(content, {level: 9}) : content
+          compilation.emitAsset(outputName, new sources.RawSource(output))
         }
       }
       const stage = Compilation.PROCESS_ASSETS_STAGE_ADDITIONAL
@@ -44,7 +48,10 @@ class CurlParserFilesPlugin {
   }
 }
 
-/** @type {import('extension').FileConfig} */
+/**
+ * Browser profiles and parser assets, with the default extension performance budgets.
+ * @type {import('extension').FileConfig}
+ */
 export default {
   browser: {
     chrome: {profile: profile('chrome')},
@@ -54,8 +61,13 @@ export default {
     'chromium-based': {profile: profile('chromium-based')},
     'gecko-based': {profile: profile('gecko-based')}
   },
-  /** Add the cURL parser files to the Rspack config that Extension.js builds. */
+  /** Use the compressed grammar loader and emit its assets while keeping the default performance budgets. */
   config(config) {
+    config.resolve ??= {}
+    config.resolve.alias = {
+      ...(config.resolve.alias ?? {}),
+      [browserParserEntry + '$']: compressedParserEntry
+    }
     config.plugins = [...(config.plugins ?? []), new CurlParserFilesPlugin()]
     return config
   }

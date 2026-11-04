@@ -24,7 +24,8 @@
     "build:edge": "extension build --browser edge"
   },
   "dependencies": {
-    "curlconverter": "^4.12.0"
+    "curlconverter": "^4.12.0",
+    "web-tree-sitter": "0.24.7"
   },
   "packageManager": "pnpm@12.4.1"
 }

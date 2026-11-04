@@ -48,6 +48,9 @@ Code under `src` is grouped by feature:
 `background.ts` connects browser events to the request and history features. `manifest.json` defines the extension entry points and permissions.
 Feature modules do not import page modules from `sidebar/` or `options/`.
 
+The build compresses the Bash grammar as `tree-sitter-bash.wasm.gz`. The sidebar loads and decompresses it only for cURL import.
+curlconverter expects an uncompressed grammar, so `curl-parser.ts` replaces its browser loader and passes decompressed bytes to `web-tree-sitter`.
+
 ## Development Commands
 
 ### dev
@@ -111,6 +114,7 @@ The suite covers:
 - HTTP error responses, connection failures, redirects, compressed bodies, and invalid input that must not send a request.
 - History previews, preserved drafts, resending, clearing, deletion, and responses arriving after deletion.
 - Native clipboard copying, raw and pretty responses, keyboard shortcuts, tab navigation, pointer and keyboard resizing, and cURL typing, clipboard paste, and Undo.
+- Compressed grammar size, loading only for cURL import, reuse, and preserved drafts when the grammar is missing or corrupt.
 - The options page defaults, saving and validation, the panel's Settings button, cut-off large responses, bodies kept out of history, and binary bodies.
 
 The unit tests cover the 100-request history limit. The e2e suite does not send 100 requests. The production sidebar document runs as an extension tab so the tests can close its real page and port. The suite does not automate the browser's native side-panel frame or toolbar. It does not test Firefox, external services, or HTTPS certificate handling. The local server supplies controlled responses and does not replace `fetch`, extension messaging, or storage. The real timeout case takes about 30 seconds.
