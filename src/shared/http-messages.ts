@@ -1,4 +1,5 @@
 /** Messages that the sidebar and the background request runner exchange through a runtime port. */
+import type {EditorState} from './request-state'
 
 /** The runtime port name for one HTTP request. The sidebar opens one port for each request. */
 export const HTTP_REQUEST_PORT = 'browsercurl.http-request'
@@ -32,10 +33,23 @@ export interface HttpResponsePayload {
 /** The message that the sidebar sends after it opens a request port. */
 export interface HttpSendMessage {
   type: 'send'
+  id: string
+  editor: EditorState
   request: HttpRequestPayload
 }
 
-/** The message that the background script sends when the request ends. */
+/**
+ * Use cancel-http-request to stop a running request by ID after a panel reopens.
+ * Use delete-saved-request to remove a complete request and response from history.
+ */
+export type HttpControlMessage =
+  | {type: 'cancel-http-request'; id: string}
+  | {type: 'delete-saved-request'; id: string}
+
+/**
+ * Use response for a complete HTTP response, and error for a failed or canceled send.
+ * storageError reports a result that the background could not persist.
+ */
 export type HttpResultMessage =
-  | {type: 'response'; response: HttpResponsePayload}
-  | {type: 'error'; message: string}
+  | {type: 'response'; response: HttpResponsePayload; storageError?: string}
+  | {type: 'error'; message: string; storageError?: string}

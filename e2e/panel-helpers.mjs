@@ -1,0 +1,86 @@
+/** Shared user actions and observations against the real extension document. No browser APIs are replaced. */
+import {expect} from '@playwright/test'
+
+/** Fill one editor field using normal browser input events. */
+export async function fill(page, selector, value) {
+  await page.locator(selector).fill(value)
+}
+
+/** Select one request or response tab through its actual button. */
+export async function click(page, selector) {
+  await page.locator(selector).click()
+}
+
+/** Compare the current value of a real form control with an expected saved value. */
+export async function expectValue(page, selector, value) {
+  const field = page.locator(selector)
+  await expect(field).toHaveValue(value)
+}
+
+/** Wait for exact visible text, including saved HTTP statuses and running indicators. */
+export async function expectText(page, selector, text) {
+  const element = page.locator(selector)
+  await expect(element).toHaveText(text)
+}
+
+/** Wait for a control or message to be visible after asynchronous background work. */
+export async function expectVisible(page, selector) {
+  const element = page.locator(selector)
+  await expect(element).toBeVisible()
+}
+
+/** Wait for a control or message to be hidden or absent. */
+export async function expectHidden(page, selector) {
+  const element = page.locator(selector)
+  await expect(element).toBeHidden()
+}
+
+/** Add and fill a header or parameter row, retaining disabled rows as actual editor data. */
+export async function addEntry(page, group, key, value, enabled = true) {
+  const tab = group === 'headers' ? '#headers-tab' : '#params-tab'
+  await click(page, tab)
+  await click(page, `[data-add="${group}"]`)
+  const row = page.locator(`#${group}-rows .entry-row`).last()
+  await row.locator('[data-field="key"]').fill(key)
+  await row.locator('[data-field="value"]').fill(value)
+  await row.locator('[data-field="enabled"]').setChecked(enabled)
+}
+
+/** Send through the real form and wait for a response instead of reading a simulated transport. */
+export async function send(page) {
+  await click(page, '#send-request')
+  await expectVisible(page, '#response-stats')
+  await expectText(page, '#send-request', 'Send')
+}
+
+/** Read the response text as JSON after the real server echoes the transmitted request. */
+export async function echoedRequest(page) {
+  const text = await page.locator('#response-content').textContent()
+  return JSON.parse(text)
+}
+
+/** Browser callback for page.evaluate(): return real saved requests from the extension page's trusted origin. */
+export async function storedHistory() {
+  const items = await chrome.storage.local.get(null)
+  const saved = []
+  for (const [key, value] of Object.entries(items)) {
+    if (key.startsWith('browsercurl.history.')) saved.push(value)
+  }
+  return saved
+}
+
+/** Browser callback for page.evaluate(): return saved editor data independently of the rendered UI. */
+export async function storedWorkspace() {
+  const items = await chrome.storage.local.get('browsercurl.workspace')
+  return items['browsercurl.workspace']
+}
+
+/** Browser callback for page.evaluate(): return real temporary header rules for cleanup checks. */
+export function sessionRules() {
+  return chrome.declarativeNetRequest.getSessionRules()
+}
+
+/** Browser callback for page.evaluate(): read the actual clipboard after the production Copy button runs. */
+export function clipboardText() {
+  return navigator.clipboard.readText()
+}

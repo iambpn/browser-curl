@@ -40,3 +40,5 @@ extension-env.d.ts
 
 .claude/demo
 .claude/screenshots
+
+.playwright/

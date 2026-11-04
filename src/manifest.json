@@ -52,6 +52,8 @@
     "browser_style": false
   },
   "chromium:permissions": [
+    "storage",
+    "unlimitedStorage",
     "sidePanel",
     "declarativeNetRequestWithHostAccess"
   ],
@@ -60,6 +62,8 @@
     "https://*/*"
   ],
   "firefox:permissions": [
+    "storage",
+    "unlimitedStorage",
     "webRequest",
     "webRequestBlocking",
     "http://*/*",

@@ -67,6 +67,10 @@ Last updated: 2026-11-03
   <!-- Mirrors browser_specific_settings.gecko.data_collection_permissions
   in the manifest. AMO reads the manifest, so the two must agree. -->
 
+The extension stores drafts, authorization values, sent requests, and responses
+locally on the user's device. It sends requests only to the URLs the user enters.
+It does not send saved history to a developer service or sync it between devices.
+
 Per store answer sheets, filled from the two lines above:
 
 - Chrome Web Store: the data-usage checkboxes and the three certifications
@@ -93,6 +97,10 @@ the extension to work" fails review on every store. -->
 
 - sidePanel: Renders the extension's main interface in the browser side
   panel. Requested on Chromium only.
+- storage: Saves the current draft and complete sent requests and responses
+  locally, so the user can restore them after the panel closes.
+- unlimitedStorage: Keeps complete response bodies and history without a fixed
+  extension storage limit. The user can delete saved requests from History.
 - tabs: TODO reason
 - Content script match <all_urls>: The content script runs on the pages the
   user visits to render the extension's on-page interface. Narrow this to

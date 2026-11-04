@@ -1,6 +1,7 @@
 /** Open the sidebar and send HTTP requests for it. */
-import {createHttpPortListener} from './background/http-runner'
+import {createHttpRequestHandlers} from './background/http-runner'
 import {createChromiumHeaderRuleRunner, createFirefoxHeaderRuleRunner} from './background/header-rules'
+import {recoverInterruptedRequests} from './shared/request-store'
 
 // Named one by one so the bundler can fold each build down to a single branch.
 const isFirefoxLike =
@@ -13,18 +14,12 @@ if (isFirefoxLike) {
   browser.browserAction.onClicked.addListener(() => {
     browser.sidebarAction.open()
   })
-
-  const handleHttpPort = createHttpPortListener(createFirefoxHeaderRuleRunner())
-  chrome.runtime.onConnect.addListener(handleHttpPort)
 }
 
 if (!isFirefoxLike) {
   // setPanelBehavior only affects FUTURE action clicks, registering it
   // inside onClicked would swallow the first toolbar click.
   chrome.sidePanel?.setPanelBehavior({openPanelOnActionClick: true})
-
-  const handleHttpPort = createHttpPortListener(createChromiumHeaderRuleRunner())
-  chrome.runtime.onConnect.addListener(handleHttpPort)
 
   // The side panel API only exists in Chromium. Firefox opens the sidebar in
   // the listener above, so this listener is compiled out of gecko builds.
@@ -47,3 +42,14 @@ if (!isFirefoxLike) {
     }
   })
 }
+
+const runWithHeaderRules = isFirefoxLike ? createFirefoxHeaderRuleRunner() : createChromiumHeaderRuleRunner()
+const requestHandlers = createHttpRequestHandlers(runWithHeaderRules)
+chrome.runtime.onConnect.addListener(requestHandlers.handleHttpPort)
+chrome.runtime.onMessage.addListener(requestHandlers.handleControlMessage)
+
+/** Report storage failure at startup without blocking the panel's request listeners. */
+function reportRecoveryFailure(error: unknown): void {
+  console.error('Could not restore request history.', error)
+}
+void recoverInterruptedRequests().catch(reportRecoveryFailure)

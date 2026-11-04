@@ -15,7 +15,12 @@
           <img class="brand-icon" src="../images/icon.svg" alt="" aria-hidden="true" />
           <span>browser<span class="brand-light">curl</span></span>
         </div>
+        <button id="show-history" class="history-button" type="button" aria-haspopup="dialog" aria-controls="history-dialog" title="View sent requests">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11a9 9 0 1 1 2.6 7M3 4v7h7M12 7v5l3 2" /></svg>
+          History
+        </button>
       </header>
+      <p id="storage-error" class="storage-error" role="alert" hidden></p>
 
       <main>
         <div class="request-heading">
@@ -24,7 +29,10 @@
             <button id="request-name" class="request-name" type="button" title="Rename request">Untitled request</button>
             <input id="request-name-input" class="request-name-input" aria-label="Request name" maxlength="120" autocomplete="off" hidden />
           </div>
-          <span class="draft-label">Draft</span>
+          <div class="workspace-actions">
+            <button id="back-to-draft" class="text-button" type="button" hidden>Back to draft</button>
+            <span id="workspace-status" class="draft-label" role="status" data-running="false"><span class="running-spinner" aria-hidden="true"></span><span id="workspace-status-label">Draft</span></span>
+          </div>
         </div>
 
         <section id="request-section" class="request-section" aria-label="Request editor">
@@ -45,6 +53,7 @@
             </div>
             <div class="request-actions">
               <span id="url-help" class="url-help">Paste a cURL command to fill in the request.</span>
+              <button id="clear-request" class="text-button" type="button" title="Clear the form and visible response. Saved history stays available.">Clear</button>
               <button id="send-request" class="send-button" type="submit">Send</button>
             </div>
             <div id="import-notice" class="import-notice" role="status" hidden>
@@ -129,7 +138,7 @@
                     </div>
                   </div>
                 </div>
-                <p class="help-text">Credentials stay in this panel session. The selected type overrides matching headers or query parameters.</p>
+                <p class="help-text">Credentials are saved locally with your draft and sent requests. The selected type overrides matching headers or query parameters.</p>
               </section>
             </div>
           </form>
@@ -172,6 +181,27 @@
       </main>
       <footer><span><kbd>Ctrl / ⌘</kbd> <kbd>↵</kbd> to send</span></footer>
     </div>
+    <dialog id="history-dialog" class="history-dialog" aria-labelledby="history-title" aria-describedby="history-description">
+      <div class="history-heading">
+        <div><h2 id="history-title">Request history</h2><p id="history-description">Sent requests and responses, saved on this device.</p></div>
+        <button id="close-history" class="remove-button" type="button" aria-label="Close history" title="Close history" autofocus>×</button>
+      </div>
+      <p id="history-error" class="request-error" role="alert" hidden></p>
+      <p id="history-empty" class="history-empty">No sent requests yet. Select Send to save a request here.</p>
+      <ul id="history-list" class="history-list" aria-label="Sent requests"></ul>
+    </dialog>
+    <template id="history-item-template">
+      <li class="history-item">
+        <button type="button" class="history-open" data-open-history>
+          <span class="history-item-heading"><span class="history-method" data-history-method></span><span class="history-name" data-history-name></span><span class="history-status" data-history-status><span class="running-spinner" aria-hidden="true"></span><span data-history-status-label></span></span></span>
+          <span class="history-url" data-history-url></span>
+          <time class="history-time"></time>
+        </button>
+        <button type="button" class="history-delete" data-delete-history title="Delete saved request and response">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6m4-6v6" /></svg>
+        </button>
+      </li>
+    </template>
     <template id="entry-template"><div class="entry-row"><input type="checkbox" data-field="enabled" checked /><input type="text" data-field="key" placeholder="Key" spellcheck="false" autocomplete="off" /><input type="text" data-field="value" placeholder="Value" spellcheck="false" autocomplete="off" /><button type="button" data-remove class="remove-button" title="Remove row">×</button></div></template>
     <script type="module" src="./scripts.ts"></script>
   </body>

@@ -2,15 +2,18 @@
  * Send HTTP requests for the sidebar from the background context.
  * The extension has host access, so the browser does not apply CORS checks to these requests.
  */
-import {sortRequestHeaders} from './locked-headers'
+import {sortRequestHeaders} from './locked-headers.ts'
 import type {HeaderRuleRunner} from './header-rules'
-import {HTTP_REQUEST_PORT, REQUEST_TIMEOUT_MS} from '../shared/http-messages'
+import {HTTP_REQUEST_PORT, REQUEST_TIMEOUT_MS} from '../shared/http-messages.ts'
+import {createSavedRequest, deleteSavedRequest, finishSavedRequest} from '../shared/request-store.ts'
+import {resolveRequestName} from '../shared/request-state.ts'
 import type {
   HeaderPair,
   HttpRequestPayload,
   HttpResponsePayload,
   HttpResultMessage,
-  HttpSendMessage
+  HttpSendMessage,
+  HttpControlMessage
 } from '../shared/http-messages'
 
 /** Send one request with the locked headers applied, and read the complete response body. */
@@ -66,24 +69,59 @@ function describeFailure(error: unknown, url: string, timedOut: boolean): string
   return 'Could not send the request.'
 }
 
-/** Return true only for ports that an extension page opened, such as the sidebar. */
-function isExtensionPage(port: chrome.runtime.Port): boolean {
+/** Return true only for messages from extension pages, such as the sidebar. */
+function isExtensionPage(sender: chrome.runtime.MessageSender | undefined): boolean {
   const extensionRoot = chrome.runtime.getURL('')
-  const senderUrl = port.sender?.url ?? ''
-  return port.sender?.id === chrome.runtime.id && senderUrl.startsWith(extensionRoot)
+  const senderUrl = sender?.url ?? ''
+  return sender?.id === chrome.runtime.id && senderUrl.startsWith(extensionRoot)
 }
 
 /**
- * Create a port listener that sends one request for each sidebar port.
- * The request stops when the sidebar disconnects the port or after the timeout.
+ * Own running requests independently of panel lifetimes, and serialize persistence through the shared store.
+ * Requests stop on explicit cancellation or timeout. Closing a panel only detaches its reply port.
  */
-export function createHttpPortListener(
+export function createHttpRequestHandlers(
   runWithHeaderRules: HeaderRuleRunner
-): (port: chrome.runtime.Port) => void {
+): {
+  handleHttpPort: (port: chrome.runtime.Port) => void
+  handleControlMessage: (
+    message: HttpControlMessage,
+    sender: chrome.runtime.MessageSender,
+    respond: (result: {error?: string}) => void
+  ) => boolean
+} {
+  const controllers = new Map<string, AbortController>()
+
+  /** Cancel running requests by ID or delete a whole history entry from a trusted extension page. */
+  function handleControlMessage(
+    message: HttpControlMessage,
+    sender: chrome.runtime.MessageSender,
+    respond: (result: {error?: string}) => void
+  ): boolean {
+    if (!isExtensionPage(sender) || typeof message?.id !== 'string') return false
+    if (message.type === 'cancel-http-request') {
+      controllers.get(message.id)?.abort()
+      respond({})
+      return false
+    }
+    if (message.type !== 'delete-saved-request') return false
+
+    /** Confirm deletion after the serialized storage operation finishes. */
+    function deleted(): void {
+      respond({})
+    }
+    /** Report a failed deletion so the panel keeps the saved item visible. */
+    function deletionFailed(): void {
+      respond({error: 'Could not delete this saved request. Try again.'})
+    }
+    void deleteSavedRequest(message.id).then(deleted, deletionFailed)
+    return true
+  }
+
   /** Serve one request on a sidebar port and clean up when the request ends. */
   function handleHttpPort(port: chrome.runtime.Port): void {
     if (port.name !== HTTP_REQUEST_PORT) return
-    if (!isExtensionPage(port)) {
+    if (!isExtensionPage(port.sender)) {
       port.disconnect()
       return
     }
@@ -91,47 +129,93 @@ export function createHttpPortListener(
     const controller = new AbortController()
     let isPortOpen = true
     let timedOut = false
+    let started = false
 
     /** Stop a request that takes longer than the timeout. */
     function abortTimedOutRequest(): void {
       timedOut = true
       controller.abort()
     }
-    const timeout = setTimeout(abortTimedOutRequest, REQUEST_TIMEOUT_MS)
-
-    /** Stop the request when the sidebar cancels it or closes. */
+    /** Detach the panel without canceling the background request or its persistence. */
     function handleDisconnect(): void {
       isPortOpen = false
-      clearTimeout(timeout)
-      controller.abort()
     }
 
     /** Send the result only if the sidebar still waits for it. */
     function reply(message: HttpResultMessage): void {
+      port.onMessage.removeListener(handlePortMessage)
+      port.onDisconnect.removeListener(handleDisconnect)
       if (!isPortOpen) return
-      port.postMessage(message)
-      port.disconnect()
       isPortOpen = false
-    }
-
-    /** Run the request from the first send message and report its result. */
-    async function handleSendMessage(message: HttpSendMessage): Promise<void> {
-      port.onMessage.removeListener(handleSendMessage)
-      if (message?.type !== 'send') return
       try {
-        const response = await sendHttpRequest(message.request, controller.signal, runWithHeaderRules)
-        reply({type: 'response', response})
-      } catch (error) {
-        const errorMessage = describeFailure(error, message.request.url, timedOut)
-        reply({type: 'error', message: errorMessage})
-      } finally {
-        clearTimeout(timeout)
+        port.postMessage(message)
+        port.disconnect()
+      } catch {
+        // The panel can close between completion and delivery. Its saved result remains available.
       }
     }
 
+    /** Reset the worker idle timer only while this bounded request is running. */
+    function keepRequestAlive(): void {
+      void chrome.runtime.getPlatformInfo()
+    }
+
+    /** Save a send attempt first, then persist its complete result even after the panel closes. */
+    async function runRequest(message: HttpSendMessage): Promise<void> {
+      controllers.set(message.id, controller)
+      try {
+        await createSavedRequest({
+          id: message.id,
+          name: resolveRequestName(message.editor.name, message.request.url),
+          sentAt: Date.now(),
+          editor: message.editor,
+          request: message.request
+        })
+      } catch {
+        controllers.delete(message.id)
+        reply({type: 'error', message: 'Could not save this request. The request was not sent.'})
+        return
+      }
+
+      const timeout = setTimeout(abortTimedOutRequest, REQUEST_TIMEOUT_MS)
+      const keepAlive = setInterval(keepRequestAlive, 10000)
+      let result: HttpResultMessage
+      try {
+        const response = await sendHttpRequest(message.request, controller.signal, runWithHeaderRules)
+        result = {type: 'response', response}
+      } catch (error) {
+        let errorMessage = describeFailure(error, message.request.url, timedOut)
+        if (controller.signal.aborted && !timedOut) errorMessage = 'Request canceled.'
+        result = {type: 'error', message: errorMessage}
+      } finally {
+        clearTimeout(timeout)
+        clearInterval(keepAlive)
+        controllers.delete(message.id)
+      }
+
+      try {
+        await finishSavedRequest(message.id, result)
+      } catch {
+        result.storageError = 'Could not save the result. The saved request has no response. Try sending it again.'
+        try {
+          await finishSavedRequest(message.id, {type: 'error', message: result.storageError})
+        } catch {
+          // The live panel still receives the result and warning when storage remains unavailable.
+        }
+      }
+      reply(result)
+    }
+
+    /** Accept one send message. Explicit cancellation uses the separate ID-based control listener. */
+    function handlePortMessage(message: HttpSendMessage): void {
+      if (message?.type !== 'send' || started) return
+      started = true
+      void runRequest(message)
+    }
+
     port.onDisconnect.addListener(handleDisconnect)
-    port.onMessage.addListener(handleSendMessage)
+    port.onMessage.addListener(handlePortMessage)
   }
 
-  return handleHttpPort
+  return {handleHttpPort, handleControlMessage}
 }

@@ -19,7 +19,7 @@ export type RequestAuthorization =
   | {type: 'api-key'; key: string; value: string; location: 'header' | 'query'}
   | {type: 'custom'; value: string}
 
-/** The current request editor values. Credentials are kept only in memory. */
+/** The current request editor values, including the selected authorization. */
 export interface RequestDraft {
   method: string
   url: string
