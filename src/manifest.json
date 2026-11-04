@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/chrome-manifest.json",
   "chromium:manifest_version": 3,
   "firefox:manifest_version": 2,
-  "version": "1.0.1",
+  "version": "1.0.2",
   "firefox:browser_specific_settings": {
     "gecko": {
       "id": "{02f04740-a0dc-4d04-afb4-1bb8593ad7f4}",
