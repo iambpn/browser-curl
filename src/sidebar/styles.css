@@ -138,6 +138,12 @@ h1, h2, h3, p {
   color: var(--accent);
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .storage-error {
   padding: 10px 20px;
   border-bottom: 1px solid var(--line);

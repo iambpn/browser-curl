@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" type="image/png" href="../images/icon-32.png" />
+    <title>Browser Curl · Settings</title>
+  </head>
+  <body>
+    <noscript>Enable JavaScript to change the settings.</noscript>
+    <main class="settings-page">
+      <header class="settings-brand">
+        <img class="brand-icon" src="../images/icon.svg" alt="" aria-hidden="true" />
+        <span>browser<span class="brand-light">curl</span></span>
+      </header>
+      <h1>Settings</h1>
+      <p class="settings-intro">Size limits for response bodies. 1 MB is 1,024 KB. New requests use the saved values.</p>
+      <form id="settings-form" class="settings-form" inert>
+        <div class="setting">
+          <label for="max-response-mb">Maximum response size (MB)</label>
+          <input id="max-response-mb" name="maxResponseMb" type="number" step="0.1" required aria-describedby="max-response-mb-hint" />
+          <p class="setting-hint" id="max-response-mb-hint">The extension stops reading a response body at this size. The panel then shows only the first part of the body.</p>
+        </div>
+        <div class="setting">
+          <label for="history-body-limit-mb">History body limit (MB)</label>
+          <input id="history-body-limit-mb" name="historyBodyLimitMb" type="number" step="0.1" required aria-describedby="history-body-limit-mb-hint" />
+          <p class="setting-hint" id="history-body-limit-mb-hint">History saves a response body only if the body is this size or smaller. For a larger body, history saves the request, status, and headers without the body. Enter 0 to never save response bodies.</p>
+        </div>
+        <div class="settings-actions">
+          <button id="save-settings" class="primary-button" type="submit">Save</button>
+          <button id="reset-settings" class="secondary-button" type="button">Use defaults</button>
+        </div>
+      </form>
+      <p id="settings-status" class="settings-status" role="status" aria-live="polite"></p>
+    </main>
+    <script type="module" src="./scripts.ts"></script>
+  </body>
+</html>

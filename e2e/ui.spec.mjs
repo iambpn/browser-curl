@@ -2,7 +2,7 @@
 import {test, expect} from './fixtures.mjs'
 import {
   addEntry, click, clipboardText, echoedRequest, expectHidden, expectText, expectValue,
-  expectVisible, fill, send, storedHistory, storedWorkspace
+  expectVisible, fill, savedWorkspaceWith, send, storedHistory, storedWorkspace
 } from './panel-helpers.mjs'
 
 /** Copy actual body and header text, and report a native clipboard refusal from an unfocused document. */
@@ -176,7 +176,7 @@ test('imports a typed cURL command without sending and supports complete Undo', 
 async function pastedCurl({extension, api}) {
   const panel = await extension.openPanel()
   await fill(panel, '#request-url', `${api.origin}/echo?before=paste`)
-  const before = await panel.evaluate(storedWorkspace)
+  const before = await savedWorkspaceWith(panel, 'url', `${api.origin}/echo?before=paste`)
   await extension.context.grantPermissions(['clipboard-read', 'clipboard-write'])
   const command = `curl '${api.origin}/echo?from=paste' -X POST -H 'Content-Type: application/json' -H 'X-Pasted: yes' --data-raw '{"pasted":true}'`
   /** Put the command on the system clipboard before a real keyboard paste. */

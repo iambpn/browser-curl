@@ -1,9 +1,10 @@
-/** Unit tests for request persistence, cancellation, disconnection, and deletion with simulated fetch and storage. */
+/** Unit tests for request persistence, size limits, cancellation, disconnection, and deletion with simulated fetch and storage. */
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {createHttpRequestHandlers} from '../src/background/http-runner.ts'
+import {createHttpRequestHandlers, isTextContentType} from '../src/background/http-runner.ts'
 import {HTTP_REQUEST_PORT, REQUEST_TIMEOUT_MS} from '../src/shared/http-messages.ts'
 import {HISTORY_KEY_PREFIX} from '../src/shared/request-store.ts'
+import {SETTINGS_KEY} from '../src/shared/settings.ts'
 import {extensionEvent, savedFixture, storageFixture} from './helpers/extension-storage.mjs'
 
 /** Run fetch without browser header rules. Header classification has its own unit tests. */
@@ -24,9 +25,10 @@ function requestPort() {
   return {port, result: reply.promise}
 }
 
-/** Start a persisted send with isolated extension APIs and an injected network implementation. */
-function startRequest(context, fetch) {
+/** Start a persisted send with isolated extension APIs, optional saved settings, and an injected network implementation. */
+function startRequest(context, fetch, settings) {
   const storage = storageFixture()
+  if (settings) storage.values.set(SETTINGS_KEY, settings)
   globalThis.chrome = storage.chrome
   context.mock.method(globalThis, 'fetch', fetch)
   const handlers = createHttpRequestHandlers(withoutHeaderRules)
@@ -187,3 +189,88 @@ function untrustedSender() {
   assert.equal(handled, false)
 }
 test('rejects request ports and control messages from webpages', untrustedSender)
+
+/** Return a completed response from the simulated network. */
+function respondWith(response) {
+  /** Resolve fetch with the given response. */
+  function fetch() { return Promise.resolve(response) }
+  return fetch
+}
+
+/** Wait until the background saves a result for the started request. */
+async function savedResult(fixture) {
+  /** Check for a stored result. */
+  function completed() { return Boolean(fixture.storage.values.get(fixture.key)?.result) }
+  await fixture.storage.waitFor(completed)
+  return fixture.storage.values.get(fixture.key).result
+}
+
+/** Stop reading at the maximum response size, and keep a large body out of history. */
+async function cutOffLargeBody(context) {
+  const bytes = 1.5 * 1024 * 1024
+  const response = new Response('a'.repeat(bytes), {headers: {'Content-Type': 'text/plain'}})
+  const settings = {maxResponseMb: 1, historyBodyLimitMb: 0.5}
+  const fixture = startRequest(context, respondWith(response), settings)
+  const result = await fixture.result
+  assert.equal(result.response.isTruncated, true)
+  assert.equal(result.response.size, 1024 * 1024)
+  assert.equal(result.response.body.length, 1024 * 1024)
+  const saved = await savedResult(fixture)
+  assert.equal(saved.response.body, '')
+  assert.equal(saved.response.isBodyOmitted, true)
+  assert.equal(saved.response.isTruncated, true)
+  assert.equal(saved.response.status, 200)
+}
+test('cuts off a body at the maximum size and omits a large body from history', cutOffLargeBody)
+
+/** Keep a body that fits both limits in history, with the default limits. */
+async function keepSmallBody(context) {
+  const response = new Response('{"small":true}', {headers: {'Content-Type': 'application/json'}})
+  const fixture = startRequest(context, respondWith(response))
+  const result = await fixture.result
+  assert.equal(result.response.isTruncated, false)
+  const saved = await savedResult(fixture)
+  assert.equal(saved.response.body, '{"small":true}')
+  assert.equal(saved.response.isBodyOmitted, undefined)
+}
+test('saves a body within the default limits in history', keepSmallBody)
+
+/** Send the full body to the panel even when history saves no bodies. */
+async function zeroHistoryLimit(context) {
+  const response = new Response('kept for the panel')
+  const fixture = startRequest(context, respondWith(response), {maxResponseMb: 10, historyBodyLimitMb: 0})
+  const result = await fixture.result
+  assert.equal(result.response.body, 'kept for the panel')
+  const saved = await savedResult(fixture)
+  assert.equal(saved.response.body, '')
+  assert.equal(saved.response.isBodyOmitted, true)
+}
+test('sends the full body to the panel when history omits it', zeroHistoryLimit)
+
+/** Do not decode or save binary bodies, but report their size. */
+async function binaryBody(context) {
+  const response = new Response(new Uint8Array([137, 80, 78, 71]), {headers: {'Content-Type': 'image/png'}})
+  const fixture = startRequest(context, respondWith(response))
+  const result = await fixture.result
+  assert.equal(result.response.isBinary, true)
+  assert.equal(result.response.body, '')
+  assert.equal(result.response.size, 4)
+  const saved = await savedResult(fixture)
+  assert.equal(saved.response.isBinary, true)
+  assert.equal(saved.response.isBodyOmitted, undefined)
+}
+test('does not decode or save binary response bodies', binaryBody)
+
+/** Treat text, structured text, and missing types as text, and other media types as binary. */
+function contentTypes() {
+  assert.equal(isTextContentType(null), true)
+  assert.equal(isTextContentType('text/html; charset=utf-8'), true)
+  assert.equal(isTextContentType('application/problem+json'), true)
+  assert.equal(isTextContentType('application/x-ndjson'), true)
+  assert.equal(isTextContentType('image/svg+xml'), true)
+  assert.equal(isTextContentType('application/x-www-form-urlencoded'), true)
+  assert.equal(isTextContentType('image/png'), false)
+  assert.equal(isTextContentType('application/octet-stream'), false)
+  assert.equal(isTextContentType('application/pdf'), false)
+}
+test('detects text and binary content types', contentTypes)

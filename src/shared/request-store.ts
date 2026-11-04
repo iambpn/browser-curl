@@ -1,9 +1,21 @@
-/** Store complete requests locally. Only the background context mutates history to serialize updates and deletion. */
+/**
+ * Store the editor workspace and sent requests locally.
+ * Each sent request has its own entry key. A separate index key holds the short list data, so the history list never
+ * reads response bodies. Only the background context changes history, so it can serialize updates and deletion.
+ */
 import type {HttpResultMessage} from './http-messages'
-import type {SavedRequest, WorkspaceState} from './request-state'
+import {summarizeSavedRequest} from './request-state.ts'
+import type {HistorySummary, SavedRequest, WorkspaceState} from './request-state'
+import {readStorage, removeStorage, writeStorage} from './storage.ts'
 
-/** Prefix for individual sent requests. Use it to recognize history changes in storage events. */
+/** Prefix for the entry keys of sent requests. Use it to recognize entry changes in storage events. */
 export const HISTORY_KEY_PREFIX = 'browsercurl.history.'
+
+/** Key for the history index: the list data of every sent request, newest first. */
+export const HISTORY_INDEX_KEY = 'browsercurl.historyIndex'
+
+/** The largest number of sent requests that history keeps. Saving a new request deletes the oldest ones. */
+export const HISTORY_LIMIT = 100
 
 /** Key for the editor workspace. Draft changes never create history entries. */
 const WORKSPACE_KEY = 'browsercurl.workspace'
@@ -11,49 +23,15 @@ const WORKSPACE_KEY = 'browsercurl.workspace'
 /** Pending history writes in this context, so deletion cannot race a response update. */
 let historyWrites = Promise.resolve()
 
-/** Read selected local storage keys, or all keys when listing sent requests. */
-function readStorage(keys: string | null): Promise<Record<string, unknown>> {
-  /** Resolve the storage read or report the browser's storage error. */
-  function read(resolve: (items: Record<string, unknown>) => void, reject: (error: Error) => void): void {
-    /** Check the callback-scoped runtime error before returning the stored values. */
-    function finish(items: Record<string, unknown>): void {
-      const error = chrome.runtime.lastError
-      if (error) reject(new Error(error.message))
-      else resolve(items)
-    }
-    chrome.storage.local.get(keys, finish)
-  }
-  return new Promise(read)
+/** Return the entry key of one sent request. */
+function entryKey(id: string): string {
+  return HISTORY_KEY_PREFIX + id
 }
 
-/** Write a snapshot immediately to the browser, including when the panel is about to close. */
-function writeStorage(items: Record<string, unknown>): Promise<void> {
-  /** Resolve only after the browser accepts the values, and surface storage failures. */
-  function write(resolve: () => void, reject: (error: Error) => void): void {
-    /** Read the callback-scoped runtime error after the write completes. */
-    function finish(): void {
-      const error = chrome.runtime.lastError
-      if (error) reject(new Error(error.message))
-      else resolve()
-    }
-    chrome.storage.local.set(items, finish)
-  }
-  return new Promise(write)
-}
-
-/** Delete one complete request and response from local storage. */
-function removeStorage(key: string): Promise<void> {
-  /** Finish deletion only after storage confirms it. */
-  function remove(resolve: () => void, reject: (error: Error) => void): void {
-    /** Surface callback-scoped storage errors without reporting success. */
-    function finish(): void {
-      const error = chrome.runtime.lastError
-      if (error) reject(new Error(error.message))
-      else resolve()
-    }
-    chrome.storage.local.remove(key, finish)
-  }
-  return new Promise(remove)
+/** Read the history index, or undefined when storage has no index yet. */
+async function readIndex(): Promise<HistorySummary[] | undefined> {
+  const items = await readStorage(HISTORY_INDEX_KEY)
+  return items[HISTORY_INDEX_KEY] as HistorySummary[] | undefined
 }
 
 /** Serialize history mutations and allow the next operation to run after a failed write. */
@@ -78,31 +56,37 @@ export function saveWorkspace(workspace: WorkspaceState): Promise<void> {
 
 /** Read a single sent request, or return undefined after it is deleted. */
 export async function loadSavedRequest(id: string): Promise<SavedRequest | undefined> {
-  const key = HISTORY_KEY_PREFIX + id
+  const key = entryKey(id)
   const items = await readStorage(key)
   return items[key] as SavedRequest | undefined
 }
 
-/** List complete sent requests newest first. Drafts and other preferences are excluded. */
-export async function listSavedRequests(): Promise<SavedRequest[]> {
-  const items = await readStorage(null)
-  const requests: SavedRequest[] = []
-  for (const [key, value] of Object.entries(items)) {
-    if (key.startsWith(HISTORY_KEY_PREFIX)) requests.push(value as SavedRequest)
-  }
-  /** Compare send times without changing stored history order. */
-  function newestFirst(left: SavedRequest, right: SavedRequest): number {
-    return right.sentAt - left.sentAt
-  }
-  return requests.sort(newestFirst)
+/** List the history data of sent requests, newest first, without reading requests or response bodies. */
+export async function listHistorySummaries(): Promise<HistorySummary[]> {
+  const index = await readIndex()
+  return index ?? []
 }
 
-/** Save the full request before the background starts its network operation. Background use only. */
+/**
+ * Save the full request before the background starts its network operation. Background use only.
+ * When history has more than HISTORY_LIMIT requests, this deletes the oldest ones.
+ */
 export function createSavedRequest(request: SavedRequest): Promise<void> {
-  /** Add this request as a distinct send attempt. */
-  function create(): Promise<void> {
-    const key = HISTORY_KEY_PREFIX + request.id
-    return writeStorage({[key]: request})
+  /** Add this request as a distinct send attempt, and remove the requests that no longer fit. */
+  async function create(): Promise<void> {
+    const index = await listHistorySummaries()
+    const summary = summarizeSavedRequest(request)
+    const updatedIndex = [summary, ...index]
+    const removedSummaries = updatedIndex.splice(HISTORY_LIMIT)
+    await writeStorage({[entryKey(request.id)]: request, [HISTORY_INDEX_KEY]: updatedIndex})
+    if (!removedSummaries.length) return
+    const removedKeys = removedSummaries.map((removed) => entryKey(removed.id))
+    try {
+      await removeStorage(removedKeys)
+    } catch (error) {
+      // The new request is saved. The old entries stay in storage, but history no longer lists them.
+      console.error('Could not remove old history entries.', error)
+    }
   }
   return mutateHistory(create)
 }
@@ -114,33 +98,77 @@ export function finishSavedRequest(id: string, result: HttpResultMessage): Promi
     const saved = await loadSavedRequest(id)
     if (!saved) return
     saved.result = result
-    const key = HISTORY_KEY_PREFIX + id
-    await writeStorage({[key]: saved})
+    const index = await listHistorySummaries()
+    const summary = summarizeSavedRequest(saved)
+    /** Replace the finished request's list data and keep every other item. */
+    function updateSummary(item: HistorySummary): HistorySummary {
+      return item.id === id ? summary : item
+    }
+    const updatedIndex = index.map(updateSummary)
+    await writeStorage({[entryKey(id)]: saved, [HISTORY_INDEX_KEY]: updatedIndex})
   }
   return mutateHistory(finish)
 }
 
-/** Remove the whole saved item in order with pending response writes. Background use only. */
+/**
+ * Remove the whole saved item in order with pending response writes. Background use only.
+ * The entry goes first. If the index write then fails, history still lists the item, and the user can delete it again.
+ */
 export function deleteSavedRequest(id: string): Promise<void> {
-  /** Remove credentials, request data, and response together. */
-  function remove(): Promise<void> {
-    return removeStorage(HISTORY_KEY_PREFIX + id)
+  /** Remove credentials, request data, and response together, and then remove the item from the list. */
+  async function remove(): Promise<void> {
+    await removeStorage(entryKey(id))
+    const index = await listHistorySummaries()
+    /** Keep every item except the deleted one. */
+    function isKept(item: HistorySummary): boolean {
+      return item.id !== id
+    }
+    const updatedIndex = index.filter(isKept)
+    await writeStorage({[HISTORY_INDEX_KEY]: updatedIndex})
   }
   return mutateHistory(remove)
+}
+
+/**
+ * Remove history entries when storage has no index, and create an empty index.
+ * This happens on a new install, and when storage holds entries from the earlier format, which had no index.
+ */
+async function removeUnindexedEntries(): Promise<void> {
+  const items = await readStorage(null)
+  /** Return true for the entry keys of sent requests. */
+  function isEntryKey(key: string): boolean {
+    return key.startsWith(HISTORY_KEY_PREFIX)
+  }
+  const keys = Object.keys(items).filter(isEntryKey)
+  if (keys.length) await removeStorage(keys)
+  await writeStorage({[HISTORY_INDEX_KEY]: []})
 }
 
 /** Mark unfinished attempts as interrupted after the background restarts. Background use only. */
 export function recoverInterruptedRequests(): Promise<void> {
   /** Update old pending records before newly received requests enter the write queue. */
   async function recover(): Promise<void> {
-    const requests = await listSavedRequests()
-    const updates: Record<string, SavedRequest> = {}
-    for (const saved of requests) {
-      if (saved.result) continue
-      saved.result = {type: 'error', message: 'The browser stopped before this request finished.'}
-      updates[HISTORY_KEY_PREFIX + saved.id] = saved
+    const index = await readIndex()
+    if (!index) {
+      await removeUnindexedEntries()
+      return
     }
-    if (Object.keys(updates).length) await writeStorage(updates)
+    const updates: Record<string, unknown> = {}
+    const updatedIndex: HistorySummary[] = []
+    for (const summary of index) {
+      if (summary.state !== 'running') {
+        updatedIndex.push(summary)
+        continue
+      }
+      const saved = await loadSavedRequest(summary.id)
+      if (!saved) continue
+      saved.result = {type: 'error', message: 'The browser stopped before this request finished.'}
+      updates[entryKey(saved.id)] = saved
+      updatedIndex.push(summarizeSavedRequest(saved))
+    }
+    if (updatedIndex.length === index.length && !Object.keys(updates).length) return
+    updates[HISTORY_INDEX_KEY] = updatedIndex
+    await writeStorage(updates)
   }
   return mutateHistory(recover)
 }

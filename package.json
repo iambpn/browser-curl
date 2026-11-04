@@ -1,7 +1,7 @@
 {
   "private": true,
   "name": "browser-curl",
-  "description": "Adds a sidebar panel to the browser with a simple page.",
+  "description": "Send HTTP requests and import cURL commands from the browser sidebar.",
   "version": "1.0.0",
   "license": "MIT",
   "type": "module",

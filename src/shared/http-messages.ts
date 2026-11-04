@@ -18,7 +18,10 @@ export interface HttpRequestPayload {
   body?: string
 }
 
-/** A complete response that the background script read. The body is decoded as UTF-8 text. */
+/**
+ * A response that the background script read. A text body is decoded as UTF-8.
+ * size is the number of body bytes that the background read. For a cut-off body, size is the maximum response size.
+ */
 export interface HttpResponsePayload {
   status: number
   statusText: string
@@ -28,6 +31,12 @@ export interface HttpResponsePayload {
   size: number
   durationMs: number
   skippedHeaders: string[]
+  /** True when the body was larger than the maximum response size. The body then holds only the first part. */
+  isTruncated: boolean
+  /** True when the Content-Type is not a text type. The body is then empty. */
+  isBinary: boolean
+  /** True only in history, when history did not save the body because the body was larger than the history limit. */
+  isBodyOmitted?: boolean
 }
 
 /** The message that the sidebar sends after it opens a request port. */

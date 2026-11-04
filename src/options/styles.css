@@ -1,0 +1,159 @@
+:root {
+  color-scheme: light;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 14px;
+  color: #30333a;
+  background: #fafaf9;
+  --surface: #fff;
+  --line: #e8e8e6;
+  --muted: #85868b;
+  --accent: #ed683e;
+  --text: #30333a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+h1, p {
+  margin: 0;
+}
+
+button, input {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  border: 0;
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.settings-page {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 32px 24px;
+}
+
+.settings-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 28px;
+  font-size: 17px;
+  font-weight: 750;
+  letter-spacing: -0.7px;
+}
+
+.brand-light {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.brand-icon {
+  width: 28px;
+  height: 28px;
+  display: block;
+}
+
+h1 {
+  font-size: 22px;
+  margin-bottom: 6px;
+}
+
+.settings-intro {
+  color: var(--muted);
+  margin-bottom: 24px;
+  line-height: 1.5;
+}
+
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.setting {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.setting label {
+  font-weight: 650;
+}
+
+.setting input {
+  width: 140px;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: transparent;
+}
+
+.setting input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.setting-hint {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.settings-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.primary-button {
+  padding: 8px 20px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 650;
+}
+
+.secondary-button {
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+}
+
+.secondary-button:hover {
+  color: var(--accent);
+}
+
+.settings-status {
+  min-height: 1.5em;
+  margin-top: 12px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    color: #dededb;
+    background: #1b1c1e;
+    --surface: #202123;
+    --line: #333437;
+    --muted: #93949b;
+    --text: #dededb;
+  }
+}

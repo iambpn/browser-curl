@@ -2,7 +2,7 @@
 import {test, expect} from './fixtures.mjs'
 import {
   addEntry, click, echoedRequest, expectHidden, expectText, expectValue, expectVisible,
-  fill, send, storedHistory, storedWorkspace
+  fill, savedWorkspaceWith, send, storedHistory, storedWorkspace
 } from './panel-helpers.mjs'
 
 /** Save and resend a request, preview it without losing an unsent draft, and delete the complete saved item. */
@@ -35,13 +35,14 @@ async function historyAndDraft({extension, api}) {
   await panel.locator('#request-method').selectOption('PATCH')
   await click(panel, '#body-tab')
   await fill(panel, '#request-body', 'unfinished draft')
-  const draft = await panel.evaluate(storedWorkspace)
+  const draft = await savedWorkspaceWith(panel, 'body', 'unfinished draft')
   await click(panel, '#show-history')
   await click(panel, '[data-open-history]')
   await expectVisible(panel, '#back-to-draft')
   await click(panel, '#body-tab')
   await expectValue(panel, '#request-body', '{"original":true}')
   await fill(panel, '#request-body', 'preview edit')
+  await savedWorkspaceWith(panel, 'body', 'preview edit')
   const unchangedHistory = await panel.evaluate(storedHistory)
   expect(unchangedHistory).toEqual(original)
   await extension.restart()

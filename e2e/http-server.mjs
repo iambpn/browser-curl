@@ -46,7 +46,7 @@ export class TestHttpServer {
     }
   }
 
-  /** Serve actual HTTP statuses, compression, redirects, failures, and controllable pending responses. */
+  /** Serve actual HTTP statuses, compression, redirects, large and binary bodies, failures, and controllable pending responses. */
   respond(received, response) {
     const url = new URL(received.url, this.origin)
     const closedResponses = this.closedResponses
@@ -61,6 +61,17 @@ export class TestHttpServer {
     }
     if (url.pathname === '/disconnect') {
       response.destroy()
+      return
+    }
+    if (url.pathname === '/large') {
+      const bytes = Number(url.searchParams.get('bytes'))
+      response.setHeader('Content-Type', 'text/plain; charset=utf-8')
+      response.end('a'.repeat(bytes))
+      return
+    }
+    if (url.pathname === '/binary') {
+      response.setHeader('Content-Type', 'image/png')
+      response.end(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
       return
     }
     if (url.pathname === '/redirect') {

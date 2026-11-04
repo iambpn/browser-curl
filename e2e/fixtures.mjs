@@ -43,6 +43,14 @@ class ExtensionSession {
     return page
   }
 
+  /** Open the production options page and wait until it loads the saved settings. */
+  async openOptions() {
+    const page = await this.context.newPage()
+    await page.goto(`chrome-extension://${this.extensionId}/options/index.html`)
+    await page.waitForFunction(optionsLoaded)
+    return page
+  }
+
   /** End the browser process and relaunch the same profile to verify on-disk persistence. */
   async restart() {
     await this.context.close()
@@ -61,6 +69,12 @@ class ExtensionSession {
 function panelRestored() {
   const root = document.querySelector('#root')
   return root && !root.inert
+}
+
+/** Check that the options page loaded the saved settings and enabled its form. */
+function optionsLoaded() {
+  const form = document.querySelector('#settings-form')
+  return form && !form.inert
 }
 
 /** Create a unique profile and always close its browser before removing its files. */

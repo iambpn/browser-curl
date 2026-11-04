@@ -7,6 +7,8 @@ import type {HeaderRuleRunner} from './header-rules'
 import {HTTP_REQUEST_PORT, REQUEST_TIMEOUT_MS} from '../shared/http-messages.ts'
 import {createSavedRequest, deleteSavedRequest, finishSavedRequest} from '../shared/request-store.ts'
 import {resolveRequestName} from '../shared/request-state.ts'
+import {DEFAULT_SETTINGS, loadSettings, megabytesToBytes} from '../shared/settings.ts'
+import type {SizeSettings} from '../shared/settings.ts'
 import type {
   HeaderPair,
   HttpRequestPayload,
@@ -16,11 +18,63 @@ import type {
   HttpControlMessage
 } from '../shared/http-messages'
 
-/** Send one request with the locked headers applied, and read the complete response body. */
+/**
+ * Media types that are text, in addition to every text/* type.
+ * The panel shows these bodies. It does not show other types, such as images, because their bytes are not text.
+ */
+const TEXT_MEDIA_TYPE_PATTERN = /json|xml|javascript|ecmascript|yaml|toml|graphql|csv|x-www-form-urlencoded/
+
+/** Return true when the Content-Type is a text type. A missing Content-Type counts as text. */
+export function isTextContentType(contentType: string | null): boolean {
+  const [mediaType] = (contentType ?? '').split(';')
+  const type = mediaType.trim().toLowerCase()
+  if (!type || type.startsWith('text/')) return true
+  return TEXT_MEDIA_TYPE_PATTERN.test(type)
+}
+
+/** Join body chunks into one byte array. */
+function joinChunks(chunks: Uint8Array[], size: number): Uint8Array {
+  const bytes = new Uint8Array(size)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return bytes
+}
+
+/**
+ * Read the response body up to maxBytes.
+ * If the body is larger, this keeps the first maxBytes bytes and cancels the rest of the download.
+ */
+async function readLimitedBody(
+  response: Response,
+  maxBytes: number
+): Promise<{bytes: Uint8Array; isTruncated: boolean}> {
+  const reader = response.body?.getReader()
+  if (!reader) return {bytes: new Uint8Array(), isTruncated: false}
+  const chunks: Uint8Array[] = []
+  let size = 0
+  while (true) {
+    const {done, value} = await reader.read()
+    if (done) return {bytes: joinChunks(chunks, size), isTruncated: false}
+    const remaining = maxBytes - size
+    if (value.byteLength > remaining) {
+      chunks.push(value.subarray(0, remaining))
+      await reader.cancel()
+      return {bytes: joinChunks(chunks, maxBytes), isTruncated: true}
+    }
+    chunks.push(value)
+    size += value.byteLength
+  }
+}
+
+/** Send one request with the locked headers applied, and read at most maxBytes of the response body. */
 async function sendHttpRequest(
   request: HttpRequestPayload,
   signal: AbortSignal,
-  runWithHeaderRules: HeaderRuleRunner
+  runWithHeaderRules: HeaderRuleRunner,
+  maxBytes: number
 ): Promise<HttpResponsePayload> {
   const url = new URL(request.url)
   const sortedHeaders = sortRequestHeaders(request.headers)
@@ -42,21 +96,40 @@ async function sendHttpRequest(
   }
 
   const response = await runWithHeaderRules(url, sortedHeaders.ruleHeaders, startFetch)
-  const buffer = await response.arrayBuffer()
+  const {bytes, isTruncated} = await readLimitedBody(response, maxBytes)
   const elapsed = performance.now() - startedAt
   const headers: HeaderPair[] = []
   for (const [name, value] of response.headers) headers.push([name, value])
+  const contentType = response.headers.get('content-type')
+  const isBinary = !isTextContentType(contentType)
 
   return {
     status: response.status,
     statusText: response.statusText,
     url: response.url,
     headers,
-    body: new TextDecoder().decode(buffer),
-    size: buffer.byteLength,
+    body: isBinary ? '' : new TextDecoder().decode(bytes),
+    size: bytes.byteLength,
     durationMs: Math.round(elapsed),
-    skippedHeaders: sortedHeaders.skippedHeaders
+    skippedHeaders: sortedHeaders.skippedHeaders,
+    isTruncated,
+    isBinary
   }
+}
+
+/** Return the result to save in history. History keeps a response without its body when the body is too large. */
+function historyResult(result: HttpResultMessage, historyLimitBytes: number): HttpResultMessage {
+  if (result.type !== 'response') return result
+  const response = result.response
+  if (response.isBinary || response.size <= historyLimitBytes) return result
+  const responseWithoutBody: HttpResponsePayload = {...response, body: '', isBodyOmitted: true}
+  return {...result, response: responseWithoutBody}
+}
+
+/** Use the default limits when storage cannot return the user's settings. */
+function useDefaultSettings(error: unknown): SizeSettings {
+  console.error('Could not read settings. The default limits apply.', error)
+  return DEFAULT_SETTINGS
 }
 
 /** Convert a fetch() failure into a message that tells the user what to check. */
@@ -160,9 +233,15 @@ export function createHttpRequestHandlers(
       void chrome.runtime.getPlatformInfo()
     }
 
-    /** Save a send attempt first, then persist its complete result even after the panel closes. */
+    /**
+     * Save a send attempt first, then persist its result even after the panel closes.
+     * The panel receives the body up to the maximum response size. History omits a body larger than the history limit.
+     */
     async function runRequest(message: HttpSendMessage): Promise<void> {
       controllers.set(message.id, controller)
+      const settings = await loadSettings().catch(useDefaultSettings)
+      const maxResponseBytes = megabytesToBytes(settings.maxResponseMb)
+      const historyLimitBytes = megabytesToBytes(settings.historyBodyLimitMb)
       try {
         await createSavedRequest({
           id: message.id,
@@ -181,7 +260,12 @@ export function createHttpRequestHandlers(
       const keepAlive = setInterval(keepRequestAlive, 10000)
       let result: HttpResultMessage
       try {
-        const response = await sendHttpRequest(message.request, controller.signal, runWithHeaderRules)
+        const response = await sendHttpRequest(
+          message.request,
+          controller.signal,
+          runWithHeaderRules,
+          maxResponseBytes
+        )
         result = {type: 'response', response}
       } catch (error) {
         let errorMessage = describeFailure(error, message.request.url, timedOut)
@@ -194,7 +278,8 @@ export function createHttpRequestHandlers(
       }
 
       try {
-        await finishSavedRequest(message.id, result)
+        const savedResult = historyResult(result, historyLimitBytes)
+        await finishSavedRequest(message.id, savedResult)
       } catch {
         result.storageError = 'Could not save the result. The saved request has no response. Try sending it again.'
         try {

@@ -14,7 +14,7 @@
     }
   },
   "name": "browsercurl",
-  "description": "Adds a sidebar panel to the browser with a simple page.",
+  "description": "Send HTTP requests and import cURL commands from the browser sidebar.",
   "icons": {
     "16": "images/icon-16.png",
     "32": "images/icon-32.png",
@@ -30,7 +30,7 @@
       "64": "images/icon-64.png",
       "128": "images/icon-128.png"
     },
-    "default_title": "Open Side Panel"
+    "default_title": "Open browsercurl"
   },
   "firefox:browser_action": {
     "default_icon": {
@@ -40,15 +40,15 @@
       "64": "images/icon-64.png",
       "128": "images/icon-128.png"
     },
-    "default_title": "Open Side Panel"
+    "default_title": "Open browsercurl"
   },
   "chromium:side_panel": {
     "default_path": "sidebar/index.html",
-    "default_title": "Side Panel Content"
+    "default_title": "browsercurl"
   },
   "firefox:sidebar_action": {
     "default_panel": "sidebar/index.html",
-    "default_title": "Side Panel Content",
+    "default_title": "browsercurl",
     "browser_style": false
   },
   "chromium:permissions": [
@@ -79,14 +79,8 @@
       "background.ts"
     ]
   },
-  "content_scripts": [
-    {
-      "matches": [
-        "<all_urls>"
-      ],
-      "js": [
-        "content/scripts.ts"
-      ]
-    }
-  ]
+  "options_ui": {
+    "page": "options/index.html",
+    "open_in_tab": true
+  }
 }

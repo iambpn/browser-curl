@@ -16,7 +16,11 @@ const output = join(project, 'dist/chromium')
 const originalHtml = readFileSync(join(output, 'sidebar/index.html'), 'utf8')
 const htmlWithoutScripts = originalHtml.replace(/<script\b[^>]*src=[^>]*><\/script>/g, '')
 const panelHtml = htmlWithoutScripts.replace(/<link\b[^>]*>/g, '')
-const panelCode = readFileSync(join(output, 'sidebar/index.js'), 'utf8')
+const panelScriptPaths = []
+for (const match of originalHtml.matchAll(/<script\b[^>]*src="\/?([^"]+)"/g)) panelScriptPaths.push(match[1])
+/** Read one of the panel's built scripts, such as the shared chunk or the panel entry. */
+function readPanelScript(path) { return readFileSync(join(output, path), 'utf8') }
+const panelCode = panelScriptPaths.map(readPanelScript).join('\n;\n')
 const panelCss = readFileSync(join(output, 'sidebar/index.css'), 'utf8')
 const backgroundCode = readFileSync(join(output, 'background/service_worker.js'), 'utf8')
 const scenario = readFileSync(new URL('./scenario.js', import.meta.url), 'utf8')

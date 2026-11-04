@@ -37,6 +37,35 @@ export interface SavedRequest {
   result?: HttpResultMessage
 }
 
+/**
+ * The short data that the history list shows for one send attempt.
+ * state is running while the request has no result, response for an HTTP response, and error for a failed or canceled send.
+ * httpStatus is set only when state is response.
+ */
+export interface HistorySummary {
+  id: string
+  name: string
+  method: string
+  url: string
+  sentAt: number
+  state: 'running' | 'response' | 'error'
+  httpStatus?: number
+}
+
+/** Make the history list data for a saved send attempt. */
+export function summarizeSavedRequest(saved: SavedRequest): HistorySummary {
+  const summary: HistorySummary = {
+    id: saved.id,
+    name: saved.name,
+    method: saved.request.method,
+    url: saved.request.url,
+    sentAt: saved.sentAt,
+    state: saved.result?.type ?? 'running'
+  }
+  if (saved.result?.type === 'response') summary.httpStatus = saved.result.response.status
+  return summary
+}
+
 /** Use an explicit name, the URL hostname, or an empty-editor label if the URL is invalid. */
 export function resolveRequestName(name: string, address: string): string {
   const explicitName = name.trim()

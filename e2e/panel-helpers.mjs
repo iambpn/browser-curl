@@ -75,6 +75,32 @@ export async function storedWorkspace() {
   return items['browsercurl.workspace']
 }
 
+/** Browser callback for page.evaluate(): return the saved size settings, or undefined before the first save. */
+export async function storedSettings() {
+  const items = await chrome.storage.local.get('browsercurl.settings')
+  return items['browsercurl.settings']
+}
+
+/** Browser callback for page.evaluate(): save size settings directly in extension storage. */
+export function saveSizeSettings(settings) {
+  return chrome.storage.local.set({'browsercurl.settings': settings})
+}
+
+/**
+ * Wait until the delayed editor save stores the given value, and return the saved workspace.
+ * field is an editor value name, such as url or body. The check uses the history preview when one is open.
+ */
+export async function savedWorkspaceWith(page, field, value) {
+  /** Read the saved value of the editor that the panel shows. */
+  async function savedValue() {
+    const workspace = await page.evaluate(storedWorkspace)
+    const snapshot = workspace?.preview ?? workspace?.draft
+    return snapshot?.editor[field]
+  }
+  await expect.poll(savedValue).toBe(value)
+  return page.evaluate(storedWorkspace)
+}
+
 /** Browser callback for page.evaluate(): return real temporary header rules for cleanup checks. */
 export function sessionRules() {
   return chrome.declarativeNetRequest.getSessionRules()

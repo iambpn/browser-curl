@@ -2,7 +2,7 @@
 
 # browser-curl
 
-> Adds a sidebar panel to the browser with a simple page.
+> Send HTTP requests and import cURL commands from the browser sidebar.
 
 ## How requests work
 
@@ -10,17 +10,27 @@
 - Cookie, Origin, Referer, User-Agent, and `Sec-*` headers are sent as you enter them. Chromium sets them with `declarativeNetRequest` session rules. Firefox sets them with a blocking `webRequest` listener. The browser always sets Host, Content-Length, and Connection itself.
 - If you do not enter an Origin header, the extension removes the browser's own Origin header, as curl does.
 - Paste a cURL command into the URL field to fill in the method, URL, query parameters, headers, body, and authorization. Select **Undo** to restore the previous values. [curlconverter](https://github.com/curlconverter/curlconverter) parses the command.
+- Select the toolbar icon to open the panel. The extension does not add anything to web pages.
+
+## Response size limits
+
+Select the gear button in the panel header, or open the extension's options in the browser, to change these limits. New requests use the saved values.
+
+- **Maximum response size** (default 10 MB, 1 to 100 MB): The extension stops reading a response body at this size. The panel shows only the first part and marks the size as cut off.
+- **History body limit** (default 2 MB, 0 to 100 MB): History saves a response body only if the body is this size or smaller. For a larger body, history keeps the request, status, headers, and size, and the panel shows a note in place of the body. The panel that sent the request still shows the full body until you close it. Enter 0 to never save response bodies.
+
+The panel does not show binary bodies, such as images or PDF files, and history does not save them. A missing Content-Type counts as text.
 
 ## Drafts and request history
 
-- The panel saves your draft as you edit it, including unfinished text, disabled rows, and authorization fields. Closing and reopening the panel restores it.
-- Select **Send** to save a separate history entry with the complete editor values, the sent request, and its response or failure. Requests without a custom name use the URL hostname.
+- The panel saves your draft as you edit it, including unfinished text, disabled rows, and authorization fields. While you type, it saves 0.3 seconds after the last keystroke. It also saves when a field loses focus and when the panel closes. Closing and reopening the panel restores it.
+- Select **Send** to save a separate history entry with the complete editor values, the sent request, and its response or failure. Requests without a custom name use the URL hostname. History keeps the newest 100 requests and deletes older ones.
 - Requests continue after you close the panel. Reopen the panel or select **History** to see a running request and its result. Select **Cancel** to stop the displayed request.
 - Select **History** in the header to open a sent request. Select **Back to draft** to return to your earlier draft. Browsing history does not overwrite that draft.
 - Select the trash button beside a history entry to delete its request and response. A response arriving after deletion does not restore the entry.
 - Select **Clear** to empty the editor and visible response. Saved history remains available, and running background requests continue.
 
-Drafts and history stay in local extension storage, including credentials and response bodies. They are not synced to another device. History stays until you delete it or remove the extension. The extension requests `storage` and `unlimitedStorage` permissions to keep complete responses without a fixed history limit. The browser stopping or restarting interrupts running requests.
+Drafts and history stay in local extension storage, including credentials and response bodies. They are not synced to another device. History stays until you delete it, it becomes one of more than 100 requests, or you remove the extension. The history list reads only a small index, so it does not load response bodies. The extension requests `storage` and `unlimitedStorage` permissions, because 100 responses of up to the history body limit can be larger than the default extension storage quota. The browser stopping or restarting interrupts running requests.
 
 ## Commands
 
@@ -85,8 +95,9 @@ The suite covers:
 - HTTP error responses, connection failures, redirects, compressed bodies, and invalid input that must not send a request.
 - History previews, preserved drafts, resending, clearing, deletion, and responses arriving after deletion.
 - Native clipboard copying, raw and pretty responses, keyboard shortcuts, tab navigation, pointer and keyboard resizing, and cURL typing, clipboard paste, and Undo.
+- The options page defaults, saving and validation, the panel's Settings button, cut-off large responses, bodies kept out of history, and binary bodies.
 
-The production sidebar document runs as an extension tab so the tests can close its real page and port. The suite does not automate the browser's native side-panel frame or toolbar. It does not test Firefox, external services, or HTTPS certificate handling. The local server supplies controlled responses and does not replace `fetch`, extension messaging, or storage. The real timeout case takes about 30 seconds.
+The unit tests cover the 100-request history limit. The e2e suite does not send 100 requests. The production sidebar document runs as an extension tab so the tests can close its real page and port. The suite does not automate the browser's native side-panel frame or toolbar. It does not test Firefox, external services, or HTTPS certificate handling. The local server supplies controlled responses and does not replace `fetch`, extension messaging, or storage. The real timeout case takes about 30 seconds.
 
 ## Learn more
 

@@ -39,7 +39,9 @@ export function storageFixture() {
             runtime.lastError = {message: 'Storage unavailable'}
           }
           const items = {}
-          const selected = keys === null ? values.keys() : [keys]
+          let selected = [keys]
+          if (keys === null) selected = values.keys()
+          if (Array.isArray(keys)) selected = keys
           for (const key of selected) {
             if (values.has(key)) items[key] = structuredClone(values.get(key))
           }
@@ -71,8 +73,8 @@ export function storageFixture() {
         }
         queueMicrotask(deliver)
       },
-      /** Remove a whole record and publish the same deletion shape as extension storage. */
-      remove(key, callback) {
+      /** Remove one or more whole records and publish the same deletion shape as extension storage. */
+      remove(keys, callback) {
         /** Complete removal after earlier queued storage callbacks. */
         function deliver() {
           if (fixture.failNextRemove) {
@@ -82,10 +84,14 @@ export function storageFixture() {
             runtime.lastError = undefined
             return
           }
-          const oldValue = values.get(key)
-          values.delete(key)
+          const changes = {}
+          for (const key of Array.isArray(keys) ? keys : [keys]) {
+            if (!values.has(key)) continue
+            changes[key] = {oldValue: values.get(key)}
+            values.delete(key)
+          }
           callback()
-          onChanged.emit({[key]: {oldValue}}, 'local')
+          if (Object.keys(changes).length) onChanged.emit(changes, 'local')
           writes.emit('change')
         }
         queueMicrotask(deliver)

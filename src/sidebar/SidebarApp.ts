@@ -6,9 +6,14 @@ import type {RequestAuthorization, RequestDraft, RequestEntry} from './request'
 import {loadResponseHeight, saveResponseHeight} from './response-height'
 import type {HeaderPair, HttpRequestPayload, HttpResponsePayload} from '../shared/http-messages'
 import type {HttpResultMessage} from '../shared/http-messages'
-import {HISTORY_KEY_PREFIX, listSavedRequests, loadSavedRequest, loadWorkspace, saveWorkspace} from '../shared/request-store'
+import {
+  HISTORY_INDEX_KEY, HISTORY_KEY_PREFIX, listHistorySummaries, loadSavedRequest, loadWorkspace, saveWorkspace
+} from '../shared/request-store'
 import {resolveRequestName} from '../shared/request-state'
-import type {EditorState, PanelSnapshot, SavedRequest} from '../shared/request-state'
+import type {EditorState, HistorySummary, PanelSnapshot, SavedRequest} from '../shared/request-state'
+
+/** Milliseconds to wait after the last keystroke before the panel saves the draft. */
+const DRAFT_SAVE_DELAY_MS = 300
 
 /** Text that starts with the curl program name, such as `curl https://…` or `curl.exe -X POST …`. */
 const CURL_COMMAND_PATTERN = /^\s*curl(?:\.exe)?\s/i
@@ -90,6 +95,37 @@ function firstLine(text: string): string {
   return line.trim()
 }
 
+/** Return the history status text: Running, the HTTP status, or Failed. */
+function historyStatusLabel(summary: HistorySummary): string {
+  if (summary.state === 'running') return 'Running'
+  if (summary.state === 'error') return 'Failed'
+  return String(summary.httpStatus ?? '')
+}
+
+/** Return the media type of a response, such as application/json, or an empty string. */
+function responseMediaType(response: HttpResponsePayload): string {
+  let contentType = ''
+  for (const [name, value] of response.headers) {
+    if (name.toLowerCase() === 'content-type') contentType = value
+  }
+  const [mediaType] = contentType.split(';')
+  return mediaType.trim()
+}
+
+/** Return the text that replaces a body that the panel does not have, or undefined when the panel shows the body. */
+function bodyPlaceholder(response: HttpResponsePayload): string | undefined {
+  const size = formatSize(response.size)
+  if (response.isBinary) {
+    const mediaType = responseMediaType(response)
+    return `(binary body not shown: ${size} of ${mediaType})`
+  }
+  if (response.isBodyOmitted) {
+    return `(body not saved in history: ${size} is larger than the history size limit in Settings)`
+  }
+  if (!response.body) return '(empty body)'
+  return undefined
+}
+
 /** Find a required element in the sidebar template. */
 function element<T extends HTMLElement>(selector: string): T {
   const node = document.querySelector<T>(selector)
@@ -111,6 +147,20 @@ class SidebarApp {
   private requestName = ''
   private historyDialog = element<HTMLDialogElement>('#history-dialog')
   private historyList = element('#history-list')
+  private historyEmpty = element('#history-empty')
+  private historyError = element('#history-error')
+  private root = element('#root')
+  private storageError = element('#storage-error')
+  private backToDraftButton = element<HTMLButtonElement>('#back-to-draft')
+  private workspaceStatus = element('#workspace-status')
+  private workspaceStatusLabel = element('#workspace-status-label')
+  private emptyTitle = element('#empty-title')
+  private emptyDescription = element('#empty-description')
+  private responseHeadersPanel = element<HTMLPreElement>('#response-headers-panel')
+  private authFields = new Map<string, HTMLInputElement | HTMLSelectElement>()
+  /** IDs of requests that this panel sent. The panel shows their results from the request port, not from storage. */
+  private sentRequestIds = new Set<string>()
+  private draftSaveTimer: ReturnType<typeof setTimeout> | undefined
   private draftBeforeHistory: PanelSnapshot | undefined
   private responseId: string | undefined
   private responseRevision = 0
@@ -137,13 +187,18 @@ class SidebarApp {
   private importWarnings = element<HTMLUListElement>('#import-warnings')
   private undoImport = element<HTMLButtonElement>('#undo-import')
   private stateBeforeImport: EditorState | undefined
+  private response: HttpResponsePayload | undefined
   private responseBody = ''
+  private prettyBody: string | undefined
   private responseHeaders = ''
   private responseTab = 'body'
   private lastUrlSearch = ''
 
   /** Restore the panel layout and connect request, naming, authorization, and resize events. */
   constructor() {
+    for (const id of AUTH_FIELD_IDS) {
+      this.authFields.set(id, element<HTMLInputElement | HTMLSelectElement>(`#${id}`))
+    }
     this.addRow('params')
     this.addRow('headers')
     this.form.addEventListener('submit', this.sendRequest)
@@ -157,17 +212,18 @@ class SidebarApp {
     this.form.addEventListener('input', this.handleRowInput)
     this.form.addEventListener('click', this.handleEditorClick)
     this.form.addEventListener('keydown', this.handleTabKey)
-    element('#root').addEventListener('input', this.persistEditorChange)
-    element('#root').addEventListener('change', this.persistEditorChange)
+    this.root.addEventListener('input', this.scheduleDraftSave)
+    this.root.addEventListener('change', this.persistEditorChange)
     element('#show-history').addEventListener('click', this.showHistory)
+    element('#open-settings').addEventListener('click', this.openSettings)
     element('#close-history').addEventListener('click', this.closeHistory)
     this.historyList.addEventListener('click', this.handleHistoryClick)
-    element('#back-to-draft').addEventListener('click', this.backToDraft)
+    this.backToDraftButton.addEventListener('click', this.backToDraft)
     element('#clear-request').addEventListener('click', this.clearRequest)
     chrome.storage.onChanged.addListener(this.handleStorageChange)
     element('#response-tabs').addEventListener('click', this.handleResponseTab)
     element('#response-tabs').addEventListener('keydown', this.handleTabKey)
-    this.responseFormat.addEventListener('change', this.renderResponse)
+    this.responseFormat.addEventListener('change', this.renderResponseBody)
     this.copy.addEventListener('click', this.copyResponse)
     this.authType.addEventListener('change', this.updateAuthorization)
     this.nameButton.addEventListener('click', this.startRenaming)
@@ -190,7 +246,7 @@ class SidebarApp {
 
   /** Restore the last editor and response before enabling input, so startup cannot overwrite a newer draft. */
   private async restoreWorkspace(): Promise<void> {
-    element('#root').inert = true
+    this.root.inert = true
     try {
       const workspace = await loadWorkspace()
       this.canPersistWorkspace = true
@@ -208,7 +264,7 @@ class SidebarApp {
       this.showStorageError(message)
     } finally {
       this.restoringWorkspace = false
-      element('#root').inert = false
+      this.root.inert = false
       this.updateRequestName()
       this.updateWorkspaceLabel()
     }
@@ -219,8 +275,10 @@ class SidebarApp {
     return {editor: this.readEditorState(), responseId: this.responseId}
   }
 
-  /** Save every editor change immediately. Background request completion stores responses separately. */
+  /** Save the editor now and cancel a pending delayed save. Background request completion stores responses separately. */
   private persistWorkspace = (): void => {
+    clearTimeout(this.draftSaveTimer)
+    this.draftSaveTimer = undefined
     if (this.restoringWorkspace || !this.canPersistWorkspace) return
     const current = this.readPanelSnapshot()
     const workspace = this.draftBeforeHistory
@@ -229,10 +287,26 @@ class SidebarApp {
     void saveWorkspace(workspace).catch(this.reportDraftFailure)
   }
 
-  /** Keep automatic names and persisted values current after input, including inactive auth fields. */
+  /** Save the editor now after a committed change, such as a selected option or a field that lost focus. */
   private persistEditorChange = (): void => {
     this.updateRequestName()
     this.persistWorkspace()
+  }
+
+  /** Save the editor after typing pauses, so the panel does not write the whole draft on each keystroke. */
+  private scheduleDraftSave = (): void => {
+    this.updateRequestName()
+    clearTimeout(this.draftSaveTimer)
+    this.draftSaveTimer = setTimeout(this.persistWorkspace, DRAFT_SAVE_DELAY_MS)
+  }
+
+  /** Open the extension options page, where the user can change the size limits. */
+  private openSettings = (): void => {
+    /** Report a browser failure to open the options page. */
+    const reportOpenFailure = (): void => {
+      if (chrome.runtime.lastError) this.showStorageError('Could not open Settings. Try again.')
+    }
+    chrome.runtime.openOptionsPage(reportOpenFailure)
   }
 
   /** Report a failed draft write without hiding a network result or clearing entered values. */
@@ -242,9 +316,8 @@ class SidebarApp {
 
   /** Show persistence failures separately from request failures. */
   private showStorageError(message: string): void {
-    const notice = element('#storage-error')
-    notice.textContent = message
-    notice.hidden = false
+    this.storageError.textContent = message
+    this.storageError.hidden = false
   }
 
   /** Restore the saved response or running state without changing the editor. */
@@ -279,21 +352,25 @@ class SidebarApp {
   private showResult(result: HttpResultMessage): void {
     if (result.type === 'response') {
       const response = result.response
+      this.response = response
       this.responseBody = response.body
+      this.prettyBody = undefined
       const headers: string[] = []
       for (const [key, value] of response.headers) headers.push(`${key}: ${value}`)
       this.responseHeaders = headers.join('\n')
       this.renderResponseStats(response)
-      this.showSkippedHeaders(response.skippedHeaders)
+      this.showResponseNotes(response)
       this.responseStats.hidden = false
       this.responseEmpty.hidden = true
       this.responseTools.hidden = false
-      this.renderResponse()
+      this.responseHeadersPanel.textContent = this.responseHeaders || '(no response headers)'
+      this.renderResponseBody()
+      this.showResponseTab()
     } else {
       this.resetResponse()
       this.showError(result.message)
-      element('#empty-title').textContent = 'No response received'
-      element('#empty-description').textContent = result.message
+      this.emptyTitle.textContent = 'No response received'
+      this.emptyDescription.textContent = result.message
     }
     if (result.storageError) this.showStorageError(result.storageError)
   }
@@ -302,7 +379,9 @@ class SidebarApp {
   private resetResponse(): void {
     this.runningId = undefined
     this.setLoading(false)
+    this.response = undefined
     this.responseBody = ''
+    this.prettyBody = undefined
     this.responseHeaders = ''
     this.error.hidden = true
     this.responseStats.hidden = true
@@ -310,22 +389,20 @@ class SidebarApp {
     this.responseTools.hidden = true
     this.responseContent.textContent = ''
     this.responseContent.hidden = true
-    const headers = element('#response-headers-panel')
-    headers.textContent = ''
-    headers.hidden = true
+    this.responseHeadersPanel.textContent = ''
+    this.responseHeadersPanel.hidden = true
     this.responseEmpty.hidden = false
-    element('#empty-title').textContent = 'Ready when you are'
-    element('#empty-description').textContent = 'Enter a URL or paste a cURL command, then select Send.'
+    this.emptyTitle.textContent = 'Ready when you are'
+    this.emptyDescription.textContent = 'Enter a URL or paste a cURL command, then select Send.'
   }
 
   /** Reflect draft, history, and running state beside the request name. */
   private updateWorkspaceLabel(): void {
-    element('#back-to-draft').hidden = !this.draftBeforeHistory
-    const status = element('#workspace-status')
-    status.dataset.running = String(Boolean(this.runningId))
+    this.backToDraftButton.hidden = !this.draftBeforeHistory
+    this.workspaceStatus.dataset.running = String(Boolean(this.runningId))
     let label = this.draftBeforeHistory ? 'History' : 'Draft'
     if (this.runningId) label = 'Running'
-    element('#workspace-status-label').textContent = label
+    this.workspaceStatusLabel.textContent = label
   }
 
   /** Open saved sends in a modal list without replacing the current editor. */
@@ -340,45 +417,53 @@ class SidebarApp {
     element('#show-history').focus()
   }
 
-  /** Render sends newest first and expose running requests with an icon and status text. */
+  /** Read the history index and render it. The index holds no request or response bodies. */
   private async renderHistory(): Promise<void> {
     const refresh = ++this.historyRefresh
     try {
-      const savedRequests = await listSavedRequests()
+      const summaries = await listHistorySummaries()
       if (refresh !== this.historyRefresh || this.disposed) return
-      const items: HTMLLIElement[] = []
-      for (const saved of savedRequests) items.push(this.historyItem(saved))
-      this.historyList.replaceChildren(...items)
-      element('#history-empty').hidden = items.length !== 0
-      element('#history-error').hidden = true
+      this.renderHistoryItems(summaries)
     } catch {
-      element('#history-error').textContent = 'Could not read request history. Close this window and try again.'
-      element('#history-error').hidden = false
+      this.showHistoryError('Could not read request history. Close this window and try again.')
     }
   }
 
+  /** Render sends newest first and expose running requests with an icon and status text. */
+  private renderHistoryItems(summaries: HistorySummary[]): void {
+    this.historyRefresh += 1
+    const items: HTMLLIElement[] = []
+    for (const summary of summaries) items.push(this.historyItem(summary))
+    this.historyList.replaceChildren(...items)
+    this.historyEmpty.hidden = items.length !== 0
+    this.historyError.hidden = true
+  }
+
+  /** Show a history read, open, or delete failure inside the History dialog. */
+  private showHistoryError(message: string): void {
+    this.historyError.textContent = message
+    this.historyError.hidden = false
+  }
+
   /** Build a safe history row from a static template, including name, URL, date, and result. */
-  private historyItem(saved: SavedRequest): HTMLLIElement {
+  private historyItem(saved: HistorySummary): HTMLLIElement {
     const template = element<HTMLTemplateElement>('#history-item-template')
     const fragment = template.content.cloneNode(true) as DocumentFragment
     const item = fragment.querySelector<HTMLLIElement>('li')!
     const open = item.querySelector<HTMLButtonElement>('[data-open-history]')!
     open.dataset.openHistory = saved.id
     item.querySelector('[data-history-name]')!.textContent = saved.name
-    item.querySelector('[data-history-method]')!.textContent = saved.request.method
+    item.querySelector('[data-history-method]')!.textContent = saved.method
     const url = item.querySelector<HTMLElement>('[data-history-url]')!
-    url.textContent = saved.request.url
-    url.title = saved.request.url
+    url.textContent = saved.url
+    url.title = saved.url
     const sentAt = new Date(saved.sentAt)
     const time = item.querySelector<HTMLTimeElement>('time')!
     time.dateTime = sentAt.toISOString()
     time.textContent = sentAt.toLocaleString()
     const status = item.querySelector<HTMLElement>('[data-history-status]')!
-    status.dataset.running = String(!saved.result)
-    let result = 'Running'
-    if (saved.result?.type === 'response') result = String(saved.result.response.status)
-    if (saved.result?.type === 'error') result = 'Failed'
-    status.querySelector('[data-history-status-label]')!.textContent = result
+    status.dataset.running = String(saved.state === 'running')
+    status.querySelector('[data-history-status-label]')!.textContent = historyStatusLabel(saved)
     const remove = item.querySelector<HTMLButtonElement>('[data-delete-history]')!
     remove.dataset.deleteHistory = saved.id
     remove.setAttribute('aria-label', `Delete ${saved.name}`)
@@ -395,8 +480,7 @@ class SidebarApp {
         await controlSavedRequest({type: 'delete-saved-request', id: remove.dataset.deleteHistory!})
       } catch {
         remove.disabled = false
-        element('#history-error').textContent = 'Could not delete this saved request. Try again.'
-        element('#history-error').hidden = false
+        this.showHistoryError('Could not delete this saved request. Try again.')
       }
       return
     }
@@ -415,8 +499,7 @@ class SidebarApp {
       this.persistWorkspace()
       this.closeHistory()
     } catch {
-      element('#history-error').textContent = 'Could not open this saved request. Try again.'
-      element('#history-error').hidden = false
+      this.showHistoryError('Could not open this saved request. Try again.')
     }
   }
 
@@ -453,7 +536,7 @@ class SidebarApp {
     this.selectTab(element<HTMLButtonElement>('#response-body-tab'))
     this.responseContent.hidden = true
     this.responseFormat.value = 'pretty'
-    element('#storage-error').hidden = true
+    this.storageError.hidden = true
     this.updateWorkspaceLabel()
     this.persistWorkspace()
     this.url.focus()
@@ -462,16 +545,21 @@ class SidebarApp {
   /** Update open history and the displayed response when the background stores a result or deletion. */
   private handleStorageChange = (changes: Record<string, chrome.storage.StorageChange>, area: string): void => {
     if (area !== 'local' || this.disposed) return
-    let historyChanged = false
+    const indexChange = changes[HISTORY_INDEX_KEY]
+    if (indexChange && this.historyDialog.open) {
+      const summaries = (indexChange.newValue ?? []) as HistorySummary[]
+      this.renderHistoryItems(summaries)
+    }
     for (const [key, change] of Object.entries(changes)) {
       if (!key.startsWith(HISTORY_KEY_PREFIX)) continue
-      historyChanged = true
       const id = key.slice(HISTORY_KEY_PREFIX.length)
       if (!change.newValue && this.draftBeforeHistory?.responseId === id) {
         this.draftBeforeHistory.responseId = undefined
         this.persistWorkspace()
       }
       if (id !== this.responseId) continue
+      // The request port delivers the full body. The history copy can omit a large body.
+      if (change.newValue && this.sentRequestIds.has(id)) continue
       this.responseRevision += 1
       if (change.newValue) this.showSavedResult(change.newValue as SavedRequest)
       else {
@@ -481,7 +569,6 @@ class SidebarApp {
         this.persistWorkspace()
       }
     }
-    if (historyChanged && this.historyDialog.open) void this.renderHistory()
   }
 
   /** Add an editable row using the static template and focus it on demand. */
@@ -621,9 +708,7 @@ class SidebarApp {
   /** Read every editor value, including auth fields for types that are not selected. */
   private readEditorState(): EditorState {
     const authValues: Record<string, string> = {}
-    for (const id of AUTH_FIELD_IDS) {
-      authValues[id] = element<HTMLInputElement | HTMLSelectElement>(`#${id}`).value
-    }
+    for (const [id, field] of this.authFields) authValues[id] = field.value
     return {
       name: this.nameInput.hidden ? this.requestName : this.nameInput.value.trim(),
       method: this.method.value,
@@ -659,9 +744,7 @@ class SidebarApp {
     this.body.value = state.body
     this.bodyType.value = state.bodyType
     this.authType.value = state.authType
-    for (const id of AUTH_FIELD_IDS) {
-      element<HTMLInputElement | HTMLSelectElement>(`#${id}`).value = state.authValues[id] ?? ''
-    }
+    for (const [id, field] of this.authFields) field.value = state.authValues[id] ?? ''
     this.updateMethod()
     this.updateAuthorization()
     this.updateCounts()
@@ -1002,6 +1085,7 @@ class SidebarApp {
       const payload = toPayload(request)
       const editor = this.readEditorState()
       id = crypto.randomUUID()
+      this.sentRequestIds.add(id)
       this.resetResponse()
       this.responseId = id
       this.runningId = id
@@ -1017,8 +1101,8 @@ class SidebarApp {
       if (error instanceof Error) message = error.message
       this.showError(message)
       this.responseEmpty.hidden = false
-      element('#empty-title').textContent = 'No response received'
-      element('#empty-description').textContent = 'Check the request details and try again.'
+      this.emptyTitle.textContent = 'No response received'
+      this.emptyDescription.textContent = 'Check the request details and try again.'
     } finally {
       if (id && this.responseId === id) {
         this.runningId = undefined
@@ -1035,16 +1119,16 @@ class SidebarApp {
     const isSuccess = response.status >= 200 && response.status < 300
     element('#response-status').dataset.success = String(isSuccess)
     element('#response-time').textContent = `${response.durationMs} ms`
-    element('#response-size').textContent = formatSize(response.size)
+    const size = formatSize(response.size)
+    element('#response-size').textContent = response.isTruncated ? `${size} (cut off)` : size
     element('#response-header-count').textContent = String(response.headers.length)
 
     let contentType = ''
     for (const [name, value] of response.headers) {
       if (name.toLowerCase() === 'content-type') contentType = value
     }
-    const [mediaType] = contentType.split(';')
     const typeElement = element('#response-type')
-    typeElement.textContent = mediaType.trim() || 'Not provided'
+    typeElement.textContent = responseMediaType(response) || 'Not provided'
     typeElement.title = contentType || 'The server did not send a Content-Type header.'
 
     const urlElement = element('#response-url')
@@ -1052,28 +1136,36 @@ class SidebarApp {
     urlElement.title = response.url
   }
 
-  /** Tell the user which entered headers the browser controls and did not send. */
-  private showSkippedHeaders(names: string[]): void {
-    const displayNames = names.map(displayHeaderName)
-    this.responseNote.hidden = names.length === 0
-    this.responseNote.textContent = `Not sent, because the browser sets these headers: ${displayNames.join(', ')}.`
+  /** Tell the user which entered headers the browser did not send, and when the body is incomplete. */
+  private showResponseNotes(response: HttpResponsePayload): void {
+    const notes: string[] = []
+    if (response.skippedHeaders.length) {
+      const displayNames = response.skippedHeaders.map(displayHeaderName)
+      notes.push(`Not sent, because the browser sets these headers: ${displayNames.join(', ')}.`)
+    }
+    if (response.isTruncated) {
+      const limit = formatSize(response.size)
+      notes.push(`The body is larger than the ${limit} maximum response size, so only the first ${limit} is shown. You can change the limit in Settings.`)
+    }
+    this.responseNote.textContent = notes.join(' ')
+    this.responseNote.hidden = notes.length === 0
   }
 
   /** Reset response state while a request is running and update the send control. */
   private setLoading(loading: boolean): void {
     this.send.textContent = loading ? 'Cancel' : 'Send'
     this.send.classList.toggle('is-loading', loading)
-    element('#response-section').setAttribute('aria-busy', String(loading))
+    this.responseSection.setAttribute('aria-busy', String(loading))
     if (!loading) return
     this.copyLabel.textContent = 'Copy'
     this.responseStats.hidden = true
     this.responseNote.hidden = true
     this.responseTools.hidden = true
     this.responseContent.hidden = true
-    element('#response-headers-panel').hidden = true
+    this.responseHeadersPanel.hidden = true
     this.responseEmpty.hidden = false
-    element('#empty-title').textContent = 'Sending request…'
-    element('#empty-description').textContent = 'Waiting for the server to respond.'
+    this.emptyTitle.textContent = 'Sending request…'
+    this.emptyDescription.textContent = 'Waiting for the server to respond.'
   }
 
   /** Switch between response body and response headers. */
@@ -1083,27 +1175,34 @@ class SidebarApp {
     if (!tab) return
     this.selectTab(tab)
     this.responseTab = tab.dataset.response!
-    this.renderResponse()
+    this.showResponseTab()
   }
 
-  /** Render server text safely, without interpreting it as HTML. */
-  private renderResponse = (): void => {
-    const pretty = this.responseFormat.value === 'pretty'
-    this.responseContent.textContent = formatResponse(this.responseBody, pretty)
-    if (!this.responseBody) this.responseContent.textContent = '(empty body)'
-    const headers = this.responseHeaders || '(no response headers)'
-    element('#response-headers-panel').textContent = headers
+  /** Show the selected response panel. The panels keep their text, so switching tabs does not render again. */
+  private showResponseTab(): void {
     this.responseContent.hidden = this.responseTab !== 'body'
-    element('#response-headers-panel').hidden = this.responseTab !== 'headers'
+    this.responseHeadersPanel.hidden = this.responseTab !== 'headers'
     this.responseFormat.hidden = this.responseTab !== 'body'
+    this.copyLabel.textContent = 'Copy'
+  }
+
+  /** Return the body in the selected format. The panel formats JSON only once for each response. */
+  private formattedBody(): string {
+    if (this.responseFormat.value !== 'pretty') return this.responseBody
+    this.prettyBody ??= formatResponse(this.responseBody, true)
+    return this.prettyBody
+  }
+
+  /** Render server text safely, without interpreting it as HTML. Runs for a new response or a format change. */
+  private renderResponseBody = (): void => {
+    const placeholder = this.response ? bodyPlaceholder(this.response) : undefined
+    this.responseContent.textContent = placeholder ?? this.formattedBody()
     this.copyLabel.textContent = 'Copy'
   }
 
   /** Copy the visible response text and report clipboard failures in the button. */
   private copyResponse = async (): Promise<void> => {
-    const pretty = this.responseFormat.value === 'pretty'
-    const body = formatResponse(this.responseBody, pretty)
-    const text = this.responseTab === 'headers' ? this.responseHeaders : body
+    const text = this.responseTab === 'headers' ? this.responseHeaders : this.formattedBody()
     try {
       await navigator.clipboard.writeText(text)
       this.copyLabel.textContent = 'Copied'

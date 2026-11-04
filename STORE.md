@@ -99,12 +99,11 @@ the extension to work" fails review on every store. -->
   panel. Requested on Chromium only.
 - storage: Saves the current draft and complete sent requests and responses
   locally, so the user can restore them after the panel closes.
-- unlimitedStorage: Keeps complete response bodies and history without a fixed
-  extension storage limit. The user can delete saved requests from History.
+- unlimitedStorage: Keeps the newest 100 sent requests with response bodies up
+  to the user's history size limit (2 MB by default), which can be larger than
+  the default extension storage quota. The user can delete saved requests from
+  History.
 - tabs: TODO reason
-- Content script match <all_urls>: The content script runs on the pages the
-  user visits to render the extension's on-page interface. Narrow this to
-  the specific sites your extension needs before submitting.
 
 Remote code: none. Every script ships inside the package, which is the
 answer to the remote code question on Chrome and Edge.
