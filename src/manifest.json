@@ -14,7 +14,7 @@
     }
   },
   "name": "browsercurl",
-  "description": "Send HTTP requests and import cURL commands from the browser sidebar.",
+  "description": "Rest API client that send HTTP requests and import cURL commands from the browser sidebar.",
   "icons": {
     "16": "images/icon-16.png",
     "32": "images/icon-32.png",
