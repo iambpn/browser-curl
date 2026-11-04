@@ -4,11 +4,11 @@
  */
 import {sortRequestHeaders} from './locked-headers.ts'
 import type {HeaderRuleRunner} from './header-rules'
-import {HTTP_REQUEST_PORT, REQUEST_TIMEOUT_MS} from '../shared/http-messages.ts'
-import {createSavedRequest, deleteSavedRequest, finishSavedRequest} from '../shared/request-store.ts'
-import {resolveRequestName} from '../shared/request-state.ts'
-import {DEFAULT_SETTINGS, loadSettings, megabytesToBytes} from '../shared/settings.ts'
-import type {SizeSettings} from '../shared/settings.ts'
+import {HTTP_REQUEST_PORT, REQUEST_TIMEOUT_MS} from './http-messages.ts'
+import {createSavedRequest, deleteSavedRequest, finishSavedRequest} from '../history/request-store.ts'
+import {resolveRequestName} from '../history/request-state.ts'
+import {DEFAULT_SETTINGS, loadSettings, megabytesToBytes} from '../settings/settings.ts'
+import type {SizeSettings} from '../settings/settings.ts'
 import type {
   HeaderPair,
   HttpRequestPayload,
@@ -16,7 +16,7 @@ import type {
   HttpResultMessage,
   HttpSendMessage,
   HttpControlMessage
-} from '../shared/http-messages'
+} from './http-messages'
 
 /**
  * Media types that are text, in addition to every text/* type.

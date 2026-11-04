@@ -3,7 +3,7 @@
  * Chromium uses declarativeNetRequest session rules. Firefox uses a blocking webRequest listener.
  * Both remove the extension's own Origin header when the editor has no Origin header, so the request matches curl.
  */
-import type {HeaderPair} from '../shared/http-messages'
+import type {HeaderPair} from './http-messages'
 
 /** The headers to add to the fetch() call that runs while the rule is active. */
 export type SendWithRule<T> = (markerHeaders: HeaderPair[]) => Promise<T>

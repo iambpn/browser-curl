@@ -1,7 +1,7 @@
 /** Unit tests for sorting request headers into fetch, rule, and browser-controlled groups. */
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {sortRequestHeaders} from '../src/background/locked-headers.ts'
+import {sortRequestHeaders} from '../src/requests/locked-headers.ts'
 
 /** Check each group and the order of normal headers. */
 function headerGroups() {

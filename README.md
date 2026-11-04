@@ -32,6 +32,22 @@ The panel does not show binary bodies, such as images or PDF files, and history 
 
 Drafts and history stay in local extension storage, including credentials and response bodies. They are not synced to another device. History stays until you delete it, it becomes one of more than 100 requests, or you remove the extension. The history list reads only a small index, so it does not load response bodies. The extension requests `storage` and `unlimitedStorage` permissions, because 100 responses of up to the history body limit can be larger than the default extension storage quota. The browser stopping or restarting interrupts running requests.
 
+## Source layout
+
+Code under `src` is grouped by feature:
+
+- `requests/`: Request types, validation, authorization, cURL import, background messaging, HTTP execution, and header rules.
+- `history/`: Editor snapshots, saved requests, history summaries, and workspace storage.
+- `responses/`: Response text formatting, byte counts, and the saved panel height.
+- `settings/`: Response size limits, validation, and saved preferences.
+- `shared/`: Browser storage helpers used by multiple features.
+- `sidebar/`: Sidebar markup, styles, startup, and coordination of the feature modules.
+- `options/`: Settings page markup, styles, and form events.
+- `images/`: Extension icons.
+
+`background.ts` connects browser events to the request and history features. `manifest.json` defines the extension entry points and permissions.
+Feature modules do not import page modules from `sidebar/` or `options/`.
+
 ## Development Commands
 
 ### dev

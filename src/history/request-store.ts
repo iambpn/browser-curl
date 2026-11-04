@@ -3,10 +3,10 @@
  * Each sent request has its own entry key. A separate index key holds the short list data, so the history list never
  * reads response bodies. Only the background context changes history, so it can serialize updates and deletion.
  */
-import type {HttpResultMessage} from './http-messages'
+import type {HttpResultMessage} from '../requests/http-messages'
 import {summarizeSavedRequest} from './request-state.ts'
 import type {HistorySummary, SavedRequest, WorkspaceState} from './request-state'
-import {readStorage, removeStorage, writeStorage} from './storage.ts'
+import {readStorage, removeStorage, writeStorage} from '../shared/storage.ts'
 
 /** Prefix for the entry keys of sent requests. Use it to recognize entry changes in storage events. */
 export const HISTORY_KEY_PREFIX = 'browsercurl.history.'

@@ -4,7 +4,7 @@
  * The sidebar loads this module only when the user pastes a cURL command, because the parser loads WebAssembly files.
  */
 import {toHarStringWarn} from 'curlconverter/dist/src/generators/har.js'
-import type {RequestAuthorization, RequestDraft, RequestEntry} from './request'
+import type {RequestAuthorization, RequestDraft, RequestEntry} from './request-types'
 
 /** One name and value pair in HAR data. */
 interface HarPair {

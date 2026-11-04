@@ -1,12 +1,12 @@
 /** Send requests through the background script, which has host access and is not limited by CORS. */
-import {HTTP_REQUEST_PORT} from '../shared/http-messages'
+import {HTTP_REQUEST_PORT} from './http-messages'
 import type {
   HttpRequestPayload,
   HttpControlMessage,
   HttpResultMessage,
   HttpSendMessage
-} from '../shared/http-messages'
-import type {EditorState} from '../shared/request-state'
+} from './http-messages'
+import type {EditorState} from '../history/request-state'
 
 /**
  * Send one request and wait for the complete response.

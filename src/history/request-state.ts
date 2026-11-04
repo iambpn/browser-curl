@@ -1,6 +1,6 @@
 /** Persistent editor values and sent requests, including credentials entered by the user. */
-import type {RequestEntry} from '../sidebar/request'
-import type {HttpRequestPayload, HttpResultMessage} from './http-messages'
+import type {RequestEntry} from '../requests/request-types'
+import type {HttpRequestPayload, HttpResultMessage} from '../requests/http-messages'
 
 /** Every editable value, including disabled rows and credentials for inactive authorization types. */
 export interface EditorState {

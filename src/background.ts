@@ -1,7 +1,7 @@
 /** Open the sidebar and send HTTP requests for it. */
-import {createHttpRequestHandlers} from './background/http-runner'
-import {createChromiumHeaderRuleRunner, createFirefoxHeaderRuleRunner} from './background/header-rules'
-import {recoverInterruptedRequests} from './shared/request-store'
+import {createHttpRequestHandlers} from './requests/http-runner'
+import {createChromiumHeaderRuleRunner, createFirefoxHeaderRuleRunner} from './requests/header-rules'
+import {recoverInterruptedRequests} from './history/request-store'
 
 // Named one by one so the bundler can fold each build down to a single branch.
 const isFirefoxLike =

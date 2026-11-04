@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import {
   DEFAULT_SETTINGS, SETTINGS_KEY, loadSettings, megabytesToBytes, normalizeSettings, saveSettings
-} from '../src/shared/settings.ts'
+} from '../src/settings/settings.ts'
 import {storageFixture} from './helpers/extension-storage.mjs'
 
 /** Use the 10 MB and 2 MB defaults when nothing is saved. */

@@ -1,5 +1,5 @@
 /** Response size limits that the user can change on the extension options page. */
-import {readStorage, writeStorage} from './storage.ts'
+import {readStorage, writeStorage} from '../shared/storage.ts'
 
 /** The local storage key for the user's settings. */
 export const SETTINGS_KEY = 'browsercurl.settings'

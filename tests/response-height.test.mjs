@@ -1,7 +1,7 @@
 /** Unit tests for the response height preference with simulated browser storage. */
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {loadResponseHeight, saveResponseHeight} from '../src/sidebar/response-height.ts'
+import {loadResponseHeight, saveResponseHeight} from '../src/responses/response-height.ts'
 
 /** Run a check with isolated browser storage and restore the original global. */
 function withStorage(storage, check) {

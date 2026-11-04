@@ -1,7 +1,7 @@
 /** Unit tests for converting pasted cURL commands into request editor values. */
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {describeImport, importCurlCommand} from '../src/sidebar/curl-import.ts'
+import {describeImport, importCurlCommand} from '../src/requests/curl-import.ts'
 
 /** Check a multi-line DevTools-style command with a JSON body, cookies, and Basic auth. */
 function devToolsCommand() {

@@ -1,5 +1,5 @@
 /** Messages that the sidebar and the background request runner exchange through a runtime port. */
-import type {EditorState} from './request-state'
+import type {EditorState} from '../history/request-state'
 
 /** The runtime port name for one HTTP request. The sidebar opens one port for each request. */
 export const HTTP_REQUEST_PORT = 'browsercurl.http-request'

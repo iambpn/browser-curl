@@ -1,10 +1,10 @@
 /** Unit tests for request persistence, size limits, cancellation, disconnection, and deletion with simulated fetch and storage. */
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {createHttpRequestHandlers, isTextContentType} from '../src/background/http-runner.ts'
-import {HTTP_REQUEST_PORT, REQUEST_TIMEOUT_MS} from '../src/shared/http-messages.ts'
-import {HISTORY_KEY_PREFIX} from '../src/shared/request-store.ts'
-import {SETTINGS_KEY} from '../src/shared/settings.ts'
+import {createHttpRequestHandlers, isTextContentType} from '../src/requests/http-runner.ts'
+import {HTTP_REQUEST_PORT, REQUEST_TIMEOUT_MS} from '../src/requests/http-messages.ts'
+import {HISTORY_KEY_PREFIX} from '../src/history/request-store.ts'
+import {SETTINGS_KEY} from '../src/settings/settings.ts'
 import {extensionEvent, savedFixture, storageFixture} from './helpers/extension-storage.mjs'
 
 /** Run fetch without browser header rules. Header classification has its own unit tests. */

@@ -4,8 +4,8 @@ import {test} from 'node:test'
 import {
   HISTORY_INDEX_KEY, HISTORY_KEY_PREFIX, HISTORY_LIMIT, createSavedRequest, deleteSavedRequest, finishSavedRequest,
   listHistorySummaries, loadSavedRequest, loadWorkspace, recoverInterruptedRequests, saveWorkspace
-} from '../src/shared/request-store.ts'
-import {resolveRequestName} from '../src/shared/request-state.ts'
+} from '../src/history/request-store.ts'
+import {resolveRequestName} from '../src/history/request-state.ts'
 import {editorFixture, savedFixture, storageFixture} from './helpers/extension-storage.mjs'
 
 /** Start each test with independent simulated persistent storage. */

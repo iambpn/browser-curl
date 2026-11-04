@@ -1,5 +1,5 @@
 /** Sort request headers by who can send them: fetch(), a network rule, or only the browser. */
-import type {HeaderPair} from '../shared/http-messages'
+import type {HeaderPair} from './http-messages'
 
 /**
  * Headers that fetch() drops but a network rule can set.

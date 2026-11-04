@@ -1,6 +1,6 @@
 /** The options page: read, validate, and save the response size limits. */
-import {DEFAULT_SETTINGS, SETTING_RANGES, loadSettings, saveSettings} from '../shared/settings'
-import type {SizeSettings} from '../shared/settings'
+import {DEFAULT_SETTINGS, SETTING_RANGES, loadSettings, saveSettings} from '../settings/settings'
+import type {SizeSettings} from '../settings/settings'
 import './styles.css'
 
 /** The input element ID for each setting. */

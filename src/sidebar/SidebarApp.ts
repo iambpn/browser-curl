@@ -1,16 +1,17 @@
 /** The sidebar's request editor and response viewer. */
-import {controlSavedRequest, sendThroughBackground} from './background-client'
-import type {CurlImport} from './curl-import'
-import {buildRequest, formatResponse, formatSize, parseRequestUrl} from './request'
-import type {RequestAuthorization, RequestDraft, RequestEntry} from './request'
-import {loadResponseHeight, saveResponseHeight} from './response-height'
-import type {HeaderPair, HttpRequestPayload, HttpResponsePayload} from '../shared/http-messages'
-import type {HttpResultMessage} from '../shared/http-messages'
+import {controlSavedRequest, sendThroughBackground} from '../requests/background-client'
+import type {CurlImport} from '../requests/curl-import'
+import {buildRequest, parseRequestUrl} from '../requests/request'
+import {formatResponse, formatSize} from '../responses/format-response'
+import type {RequestAuthorization, RequestDraft, RequestEntry} from '../requests/request-types'
+import {loadResponseHeight, saveResponseHeight} from '../responses/response-height'
+import type {HeaderPair, HttpRequestPayload, HttpResponsePayload} from '../requests/http-messages'
+import type {HttpResultMessage} from '../requests/http-messages'
 import {
   HISTORY_INDEX_KEY, HISTORY_KEY_PREFIX, listHistorySummaries, loadSavedRequest, loadWorkspace, saveWorkspace
-} from '../shared/request-store'
-import {resolveRequestName} from '../shared/request-state'
-import type {EditorState, HistorySummary, PanelSnapshot, SavedRequest} from '../shared/request-state'
+} from '../history/request-store'
+import {resolveRequestName} from '../history/request-state'
+import type {EditorState, HistorySummary, PanelSnapshot, SavedRequest} from '../history/request-state'
 
 /** Milliseconds to wait after the last keystroke before the panel saves the draft. */
 const DRAFT_SAVE_DELAY_MS = 300
@@ -644,7 +645,7 @@ class SidebarApp {
     let imported: CurlImport
     let summary: string
     try {
-      const curlImport = await import('./curl-import')
+      const curlImport = await import('../requests/curl-import')
       imported = curlImport.importCurlCommand(command)
       summary = curlImport.describeImport(imported.draft)
     } catch (error) {
