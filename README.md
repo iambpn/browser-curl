@@ -2,6 +2,19 @@
 
 A REST API client in the browser sidebar for Chromium and Firefox. Send HTTP requests, import cURL commands, and inspect responses without leaving your browser.
 
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/request-response.png" alt="A POST request with a JSON body and a formatted 201 Created response" width="320"><br><sub>Send a JSON request and inspect the response</sub></td>
+    <td align="center"><img src="docs/screenshots/curl-import.png" alt="A pasted cURL command imported into the method, URL, and headers fields" width="320"><br><sub>Import a cURL command into the editor</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/history.png" alt="The request history dialog with four sent requests and their statuses" width="320"><br><sub>Reopen sent requests from history</sub></td>
+    <td align="center"><img src="docs/screenshots/dark-mode.png" alt="The sidebar in dark mode with Bearer token authorization and a 200 OK response" width="320"><br><sub>Use dark mode and authorization</sub></td>
+  </tr>
+</table>
+
 ## Features
 
 - **Request editor:** Set the HTTP method, URL, query parameters, headers, and JSON or text body. Keep disabled rows for later use.
