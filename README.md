@@ -2,6 +2,8 @@
 
 A REST API client in the browser sidebar for Chromium and Firefox. Send HTTP requests, import cURL commands, and inspect responses without leaving your browser.
 
+[Get browsercurl for Firefox](https://addons.mozilla.org/en-US/firefox/addon/browsercurl/)
+
 ## Screenshots
 
 <table>
@@ -26,8 +28,20 @@ A REST API client in the browser sidebar for Chromium and Firefox. Send HTTP req
 - **Panel controls:** Resize the response area and send requests with **Ctrl+Enter** or **Command+Enter**.
 - **Size settings:** Limit response downloads and choose which response bodies history saves.
 
+## Install from Firefox Add-ons
+
+browsercurl is available on Firefox Add-ons. Mozilla signs this version, so it installs in standard Firefox Release:
+
+1. Open [browsercurl on Firefox Add-ons](https://addons.mozilla.org/en-US/firefox/addon/browsercurl/).
+2. Select **Add to Firefox**.
+3. Review the permissions and confirm the installation.
+4. Select the browsercurl toolbar icon to open the sidebar.
+
+Firefox updates the add-on automatically.
+
 ## Install release packages
 
+Use these packages for Chrome, or for Firefox development and testing.
 Download the package for your browser from [GitHub Releases](https://github.com/iambpn/browser-curl/releases).
 ZIP files contain unpacked builds. Firefox `-unsigned.xpi` files have no Mozilla signature. Chrome `-self-signed.crx` files use a local signing key.
 
@@ -90,7 +104,7 @@ In a separate development profile on a supported Firefox edition:
 4. Select the `-firefox-unsigned.xpi` file and confirm the installation.
 
 Disabling signature checks affects every extension in that profile. Re-enabling checks can disable unsigned extensions.
-For normal Firefox Release installation, use a Mozilla-signed XPI. See [Mozilla's signing guide](https://extensionworkshop.com/documentation/publish/signing-and-distribution-overview/).
+For normal Firefox Release installation, use the [Firefox Add-ons version](https://addons.mozilla.org/en-US/firefox/addon/browsercurl/). See [Mozilla's signing guide](https://extensionworkshop.com/documentation/publish/signing-and-distribution-overview/).
 
 ## Usage
 
