@@ -164,27 +164,28 @@ export function renameCollectionItem(collectionId: string, itemId: string, name:
 export function deleteCollectionItem(collectionId: string, itemId: string, confirmed = false): Promise<boolean> {
   return navigator.locks.request(COLLECTION_INDEX_KEY, async () => {
     const collection = await loadCollection(collectionId)
-    if (!collection) return true
-    const item = itemId === collectionId ? collection : findCollectionItem(collection, itemId)
-    if (!item) return true
-    if ('requests' in item && item.requests.length && !confirmed) return false
-    if (item === collection) {
+    if (itemId === collectionId) {
+      if (collection?.requests.length && !confirmed) return false
       const index = (await listCollections()).filter(({id}) => id !== collectionId)
-      // Remove credentials before the index, matching history deletion.
+      // Remove credentials first. A retry must clean the index even if removal already succeeded.
       await removeStorage(COLLECTION_KEY_PREFIX + collectionId)
       await writeStorage({[COLLECTION_INDEX_KEY]: index})
-    } else {
-      const remove = (parent: Collection | CollectionFolder): boolean => {
-        const index = parent.requests.findIndex(({id}) => id === itemId)
-        if (index !== -1) {
-          parent.requests.splice(index, 1)
-          return true
-        }
-        return parent.requests.some((child) => 'requests' in child && remove(child))
-      }
-      remove(collection)
-      await writeStorage({[COLLECTION_KEY_PREFIX + collectionId]: collection})
+      return true
     }
+    if (!collection) return true
+    const item = findCollectionItem(collection, itemId)
+    if (!item) return true
+    if ('requests' in item && item.requests.length && !confirmed) return false
+    const remove = (parent: Collection | CollectionFolder): boolean => {
+      const index = parent.requests.findIndex(({id}) => id === itemId)
+      if (index !== -1) {
+        parent.requests.splice(index, 1)
+        return true
+      }
+      return parent.requests.some((child) => 'requests' in child && remove(child))
+    }
+    remove(collection)
+    await writeStorage({[COLLECTION_KEY_PREFIX + collectionId]: collection})
     return true
   })
 }

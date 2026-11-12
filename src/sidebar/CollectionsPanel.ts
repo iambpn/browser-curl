@@ -280,7 +280,11 @@ export class CollectionsPanel {
         await this.render()
       }
     } catch {
-      this.showError('Could not delete this item. Try again.')
+      if (!this.dialog.open || this.disposed) return
+      // A collection row may already be gone if only the index write failed.
+      this.pendingDelete = target
+      element('#collection-delete-message').textContent = `Could not finish deleting “${target.name}”. Try again.`
+      this.deleteWarning.hidden = false
     } finally {
       confirm.disabled = false
     }

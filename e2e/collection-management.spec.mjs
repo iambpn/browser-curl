@@ -227,6 +227,53 @@ test('confirms deletion of a collection with content and removes its entire save
   await expect(panel.locator('#save-as-dialog')).toBeVisible()
 })
 
+for (const populated of [false, true]) {
+  test(`retries collection deletion after its data is removed but its index write fails (${populated ? 'populated' : 'empty'})`, async ({extension}) => {
+    let panel = await extension.openPanel()
+    await click(panel, '#show-collections')
+    await create(panel, 'Keep')
+    await create(panel, 'Delete me')
+    if (populated) await create(panel, 'Nested folder', 'Delete me')
+    const before = await panel.evaluate(storedCollections)
+    const deletedId = before.index.find(({name}) => name === 'Delete me').id
+    // Reject only the index update, after the collection removal has reached real storage.
+    await panel.evaluate(() => {
+      const set = chrome.storage.local.set.bind(chrome.storage.local)
+      chrome.storage.local.set = (items, callback) => {
+        if (!Object.hasOwn(items, 'browsercurl.collectionIndex')) return set(items, callback)
+        chrome.storage.local.set = set
+        throw new Error('Storage write failed')
+      }
+    })
+    await row(panel, 'Delete me').getByRole('button', {name: 'Delete', exact: true}).click()
+    if (populated) await click(panel, '#confirm-collection-delete')
+    await expect.poll(async () => {
+      const saved = await panel.evaluate(storedCollections)
+      return saved.collections.map(({name}) => name)
+    }).toEqual(['Keep'])
+    expect((await panel.evaluate(storedCollections)).index).toEqual(before.index)
+    await expect(panel.locator('#collection-delete-warning')).toContainText('Try again')
+    await expect(panel.locator('#confirm-collection-delete')).toBeEnabled()
+    await proof(panel, `collection-delete-${populated ? 'populated' : 'empty'}-retry`)
+    await click(panel, '#confirm-collection-delete')
+    await expectHidden(panel, '#collection-delete-warning')
+    const remaining = before.collections.filter(({id}) => id !== deletedId)
+    expect(await panel.evaluate(storedCollections)).toEqual({
+      index: before.index.filter(({id}) => id !== deletedId), collections: remaining
+    })
+    await expect(row(panel, 'Keep')).toBeVisible()
+    await expect(row(panel, 'Delete me')).toHaveCount(0)
+    await proof(panel, `collection-delete-${populated ? 'populated' : 'empty'}-recovered`)
+    await extension.restart()
+    panel = await extension.openPanel()
+    await click(panel, '#show-collections')
+    expect(await panel.evaluate(storedCollections)).toEqual({
+      index: before.index.filter(({id}) => id !== deletedId), collections: remaining
+    })
+    await expect(panel.locator('[data-collection-name]')).toHaveText(['Keep'])
+  })
+}
+
 test('keeps another panel and its folder picker current after creating, renaming, and deleting folders', async ({extension, api}) => {
   const first = await extension.openPanel()
   await click(first, '#show-collections')
