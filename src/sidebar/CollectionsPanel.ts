@@ -60,7 +60,7 @@ export class CollectionsPanel {
     private readEditor: () => EditorState,
     private openEditor: (editor: EditorState, link: CollectionRequestLink) => void,
     private readLink: () => CollectionRequestLink | undefined,
-    private linkEditor: (link: CollectionRequestLink, name: string) => void,
+    private linkEditor: (link: CollectionRequestLink, name?: string) => void,
     private readEditorRevision: () => number
   ) {
     element('#show-collections').addEventListener('click', this.show)
@@ -250,12 +250,13 @@ export class CollectionsPanel {
     this.saveError.hidden = true
     try {
       const editorRevision = this.readEditorRevision()
-      const editor = {...this.readEditor(), name}
+      const editor = this.readEditor()
       const destination = isNew ? {name: collectionName} : {id: this.picker.value}
-      const link = await addCollectionRequest(destination, editor)
+      const link = await addCollectionRequest(destination, {...editor, name})
       // The snapshot is saved, but Clear or loading another request must keep its own editor and link.
       if (this.disposed || editorRevision !== this.readEditorRevision()) return
-      this.linkEditor(link, name)
+      // Link the saved copy, but apply its name only if the user has not edited the name while saving.
+      this.linkEditor(link, this.readEditor().name === editor.name ? name : undefined)
       this.saveDialog.close()
       this.showSavedStatus()
     } catch {

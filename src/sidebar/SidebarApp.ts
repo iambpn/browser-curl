@@ -531,10 +531,10 @@ class SidebarApp {
     this.persistWorkspace()
   }
 
-  /** Save as changes the destination and request name while preserving the current response and editor values. */
-  private linkCollectionRequest = (link: CollectionRequestLink, name: string): void => {
+  /** Save as changes the destination and, unless edited during the save, the request name. */
+  private linkCollectionRequest = (link: CollectionRequestLink, name?: string): void => {
     this.collectionRequest = link
-    this.requestName = name
+    if (name !== undefined) this.requestName = name
     this.updateRequestName()
     void this.updateCollectionHeading()
     this.persistWorkspace()

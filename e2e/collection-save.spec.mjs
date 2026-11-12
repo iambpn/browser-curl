@@ -353,6 +353,47 @@ for (const action of ['cleared', 'replaced']) {
   })
 }
 
+for (const rename of ['committed', 'in progress']) {
+  test(`a pending Save as preserves a newer request name (${rename})`, async ({extension, api}) => {
+    const panel = await extension.openPanel()
+    await fill(panel, '#request-url', `${api.origin}/echo?original=yes`)
+    await saveAs(panel, 'Original request', 'Widget API')
+    const before = await panel.evaluate(storedCollections)
+
+    await holdCollectionLock(panel)
+    await click(panel, '#save-as')
+    await fill(panel, '#save-request-name', 'Pending copy')
+    await click(panel, '#confirm-save-as')
+    await expectPendingCollectionSave(panel)
+    await click(panel, '#cancel-save-as')
+    await click(panel, '#request-name')
+    await fill(panel, '#request-name-input', 'New user edit')
+    if (rename === 'committed') await panel.keyboard.press('Enter')
+
+    await releaseCollectionLock(panel)
+    await expect(panel.locator('#confirm-save-as')).toBeEnabled()
+    if (rename === 'in progress') {
+      await expectValue(panel, '#request-name-input', 'New user edit')
+      await panel.keyboard.press('Enter')
+    }
+    await expectText(panel, '#request-name', 'New user edit')
+    const workspace = await savedWorkspaceWith(panel, 'name', 'New user edit')
+    const saved = await panel.evaluate(storedCollections)
+    expect(saved.collections[0].requests).toHaveLength(2)
+    expect(saved.collections[0].requests[0]).toEqual(before.collections[0].requests[0])
+    const copy = saved.collections[0].requests[1]
+    expect(copy.editor).toEqual({...before.collections[0].requests[0].editor, name: 'Pending copy'})
+    expect(workspace.draft.collectionRequest).toEqual({collectionId: saved.collections[0].id, requestId: copy.id})
+    await evidence(panel, `pending-save-as-name-${rename.replaceAll(' ', '-')}`)
+
+    // The newer name remains an unsaved edit to the copy until the next explicit Save.
+    await click(panel, '#save-request')
+    await expect.poll(async () => (await panel.evaluate(storedCollections)).collections[0].requests[1].editor.name)
+      .toBe('New user edit')
+    expect((await panel.evaluate(storedCollections)).collections[0].requests[0]).toEqual(before.collections[0].requests[0])
+  })
+}
+
 test('Save as becomes usable when a pending linked Save finishes', async ({extension, api}) => {
   const panel = await extension.openPanel()
   await fill(panel, '#request-url', `${api.origin}/echo?original=yes`)
