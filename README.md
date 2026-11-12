@@ -23,6 +23,7 @@ A REST API client in the browser sidebar for Chromium and Firefox. Send HTTP req
 - **Authorization:** Use Bearer tokens, Basic auth, API keys in headers or query parameters, or a custom Authorization header.
 - **cURL import:** Paste a command into the URL field to fill the editor. Review import warnings and select **Undo** to restore the earlier values.
 - **Background requests:** Keep requests running after the panel closes. Reopen the panel to view the result or cancel a running request.
+- **Collections:** Use **Save as** to keep named requests in a new or existing collection. Reopen them with every editor value, including disabled rows and authorization.
 - **Drafts and history:** Restore unfinished drafts and browse the latest 100 sent requests, including their responses or failures.
 - **Response viewer:** Inspect status, headers, size, and duration. Switch between raw text and formatted JSON, then copy the result.
 - **Panel controls:** Resize the response area and send requests with **Ctrl+Enter** or **Command+Enter**.
@@ -114,6 +115,8 @@ For normal Firefox Release installation, use the [Firefox Add-ons version](https
 4. Select **Send** to make the request and inspect its response.
 5. Select **History** to reopen a saved request. Select **Back to draft** to return to the earlier draft.
 
+Select **Save as** to keep a request in a collection, then **Collections** to open it again.
+
 Select the gear button to change response limits. Select **Clear** to empty the editor and visible response. Saved history and running requests remain available.
 
 ### Response limits
@@ -126,11 +129,11 @@ Binary bodies, such as images and PDFs, are not displayed or saved in history.
 
 ### Storage and permissions
 
-Drafts and history stay in local extension storage, including entered credentials and saved response bodies. They are not synced to another device.
+Drafts, history, and collections stay in local extension storage, including entered credentials and saved response bodies. They are not synced to another device.
 History keeps the newest 100 requests. Delete an entry to remove its request and response. Removing the extension also removes its local data.
 
 The extension requests access to HTTP and HTTPS sites so the background script can send requests without web page CORS restrictions.
-The `storage` and `unlimitedStorage` permissions support saved drafts and response history. The extension does not inject content scripts into web pages.
+The `storage` and `unlimitedStorage` permissions support saved drafts, collections, and response history. The extension does not inject content scripts into web pages.
 
 Chromium uses network rules to set headers such as Cookie, Origin, Referer, User-Agent, and `Sec-*`. Firefox uses a blocking `webRequest` listener.
 The browser controls Host, Content-Length, and Connection. If the editor has no Origin header, the extension removes the browser's own Origin header.
@@ -314,6 +317,7 @@ It does not cover Firefox runtime behavior, external services, HTTPS certificate
 ```text
 src/
   background.ts  Browser events and background startup
+  collections/   Collection snapshots and local storage
   history/       Saved requests, editor snapshots, and workspace storage
   images/        Extension icons
   manifest.json  Browser entry points and permissions

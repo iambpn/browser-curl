@@ -6,6 +6,14 @@ browser-curl is a browser extension. Its sidebar sends HTTP requests and imports
 
 Call the tools in `node_modules/.bin` directly, as the checks below do. The `pnpm` command on this machine does not work in the sandbox. If you must change dependencies, run `npx --yes pnpm@12.4.1 install` and commit `pnpm-lock.yaml`.
 
+The e2e global setup installs Playwright's pinned full Chromium when it is missing from the current user's cache. A fresh sandbox therefore needs network access on its first e2e run. To install it ahead of time as the same user that runs the checks:
+
+```sh
+node_modules/.bin/playwright install chromium --no-shell
+```
+
+Playwright keeps browser executables in a user cache outside `node_modules`. Copying installed dependencies into a worktree does not copy that cache. The global setup also handles a missing cache after updating Playwright or changing the sandbox user; installation failures fail the check before any tests run. The e2e fixture uses full Chromium (`channel: 'chromium'`), so it needs that browser even when Google Chrome is installed for the simulated browser test.
+
 ## Checks
 
 Run these commands in this order. Each must exit with code 0.

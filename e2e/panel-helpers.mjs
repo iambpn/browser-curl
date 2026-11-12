@@ -110,3 +110,12 @@ export function sessionRules() {
 export function clipboardText() {
   return navigator.clipboard.readText()
 }
+
+/** Browser callback for page.evaluate(): read collections and their index from real extension storage. */
+export async function storedCollections() {
+  const items = await chrome.storage.local.get(null)
+  return {
+    index: items['browsercurl.collectionIndex'] ?? [],
+    collections: Object.entries(items).filter(([key]) => key.startsWith('browsercurl.collection.')).map(([, value]) => value)
+  }
+}
