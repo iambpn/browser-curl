@@ -1,6 +1,7 @@
 /** Convert Postman files as plain data. Local storage and downloads belong to the caller. */
 import type {EditorState} from '../history/request-state'
 import type {RequestEntry} from '../requests/request-types'
+import {parse as parsePostmanUrl} from 'postman-url-encoder/parser/index.js'
 
 export interface ImportedRequest {editor: EditorState}
 export interface ImportedFolder {name: string; requests: ImportedItem[]}
@@ -16,7 +17,8 @@ export function exportPostmanCollection(collection: ImportedCollection): {json: 
   const items = (children: ImportedItem[]): ObjectValue[] => children.map((item) => {
     if ('requests' in item) return {name: item.name, item: items(item.requests)}
     const editor = item.editor
-    const query = editor.params.map(({enabled, key, value}) => ({
+    // The editor's blank rows are placeholders; sending also ignores keys with no text.
+    const query = editor.params.filter(({key}) => key.trim()).map(({enabled, key, value}) => ({
       key: encodeQueryComponent(key), value: encodeQueryComponent(value), disabled: !enabled
     }))
     const header = editor.headers
@@ -26,14 +28,17 @@ export function exportPostmanCollection(collection: ImportedCollection): {json: 
       header.push({key: 'Authorization', value: editor.authValues['custom-authorization'] ?? '', disabled: false})
     }
     // Query rows are authoritative, even when the URL field still has an older query string.
-    // Avoid URL parsing: hosts, paths, and query text can contain Postman variables.
-    const hashIndex = editor.url.indexOf('#')
-    const hash = hashIndex === -1 ? '' : editor.url.slice(hashIndex)
-    const address = hashIndex === -1 ? editor.url : editor.url.slice(0, hashIndex)
+    // Postman's SDK uses structured components, not raw, when reading a URL object.
+    // Its parser keeps variable references intact, including names containing URL delimiters.
+    const url = parsePostmanUrl(editor.url)
+    const hash = url.hash === undefined ? '' : `#${url.hash}`
+    const queryLength = url.query === undefined ? 0 : url.query.join('&').length + 1
+    const address = url.raw.slice(0, url.raw.length - hash.length - queryLength)
     const search = query.filter(({disabled}) => !disabled).map(({key, value}) => `${key}=${value}`).join('&')
-    const raw = address.split('?')[0] + (search ? `?${search}` : '') + hash
+    const raw = address + (search ? `?${search}` : '') + hash
     return {name: editor.name, request: {
-      method: editor.method, url: {raw, query}, header,
+      method: editor.method, url: {...url, raw, query,
+        ...(url.auth ? {auth: {user: url.auth[0], password: url.auth[1]}} : {})}, header,
       body: {mode: 'raw', raw: editor.body, options: {raw: {language: editor.bodyType === 'json' ? 'json' : 'text'}}},
       auth: exportAuth(editor)
     }}

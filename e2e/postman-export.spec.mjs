@@ -81,7 +81,8 @@ test('cancels the credential note without downloading, then exports the saved ne
   const item = json.item[0].item[0].item[0]
   expect(item.name).toBe('Create widget')
   expect(item.request).toEqual({
-    method: 'POST', url: {raw: `${api.origin}/echo?kept=yes`, query: [
+    method: 'POST', url: {raw: `${api.origin}/echo?kept=yes`,
+      protocol: 'http', host: new URL(api.origin).hostname.split('.'), port: new URL(api.origin).port, path: ['echo'], query: [
       {key: 'kept', value: 'yes', disabled: false}, {key: 'disabled', value: '{{not-sent}}', disabled: true}
     ]},
     header: [{key: 'X-Widget', value: 'imported', disabled: false}, {key: 'X-Disabled', value: '{{not-sent}}', disabled: true}],
@@ -147,4 +148,66 @@ test('does not download when saving the generated ID fails and allows retry', as
   const {json} = await confirmDownload(panel)
   expect(downloads).toHaveLength(1)
   expect((await panel.evaluate(storedCollections)).collections[0].postmanId).toBe(json.info._postman_id)
+})
+
+test('exports a manually saved request with untouched Params without adding a query', async ({extension}) => {
+  const panel = await extension.openPanel()
+  await fill(panel, '#request-url', 'https://example.com/health')
+  await click(panel, '#save-as')
+  await fill(panel, '#save-request-name', 'Health')
+  await fill(panel, '#new-collection-name', 'Manual API')
+  await click(panel, '#confirm-save-as')
+  await expectHidden(panel, '#save-as-dialog')
+  const saved = await panel.evaluate(storedCollections)
+  expect(saved.collections[0].requests[0].editor.params).toEqual([{enabled: true, key: '', value: ''}])
+  await click(panel, '#show-collections')
+  await collectionRow(panel, 'Manual API').getByRole('button', {name: 'Export', exact: true}).click()
+  const {json} = await confirmDownload(panel)
+  expect(json.item[0].request.url.raw).toBe('https://example.com/health')
+  expect(json.item[0].request.url.query).toEqual([])
+  await capture(panel, 'export-manual-request')
+})
+
+test('cancelling a confirmed export invalidates its delayed download when the same collection is reopened', async ({extension}) => {
+  const panel = await extension.openPanel()
+  const downloads = []
+  panel.on('download', download => downloads.push(download))
+  await click(panel, '#show-collections')
+  await click(panel, '#new-collection')
+  await fill(panel, '#collection-item-name', 'Delayed export')
+  await click(panel, '#confirm-collection-item')
+  const exportButton = collectionRow(panel, 'Delayed export').getByRole('button', {name: 'Export', exact: true})
+  await exportButton.click()
+  await panel.evaluate(() => {
+    const get = chrome.storage.local.get.bind(chrome.storage.local)
+    chrome.storage.local.get = (keys, callback) => {
+      if (typeof keys !== 'string' || !keys.startsWith('browsercurl.collection.')) return get(keys, callback)
+      chrome.storage.local.get = get
+      get(keys, items => { window.finishExportRead = () => callback(items) })
+    }
+    const create = URL.createObjectURL.bind(URL)
+    window.exportBlobCount = 0
+    URL.createObjectURL = blob => {
+      window.exportBlobCount++
+      return create(blob)
+    }
+  })
+  await click(panel, '#confirm-collection-export')
+  await panel.waitForFunction(() => typeof window.finishExportRead === 'function')
+  await expect(panel.locator('#confirm-collection-export')).toBeDisabled()
+  await click(panel, '#cancel-collection-export')
+  await exportButton.click()
+  await expect(panel.locator('#collection-export-warning')).toBeVisible()
+  await panel.evaluate(() => window.finishExportRead())
+  // Enabled again means the old async confirmation has finished, including its download guard.
+  await expect(panel.locator('#confirm-collection-export')).toBeEnabled()
+  expect(await panel.evaluate(() => window.exportBlobCount)).toBe(0)
+  expect(downloads).toHaveLength(0)
+  await expect(panel.locator('#collection-export-warning')).toBeVisible()
+  await capture(panel, 'export-cancelled-pending-read')
+  await confirmDownload(panel)
+  expect(downloads).toHaveLength(1)
+  expect(await panel.evaluate(() => window.exportBlobCount)).toBe(1)
+  await expectHidden(panel, '#collection-export-warning')
+  await capture(panel, 'export-confirmed-after-cancellation')
 })

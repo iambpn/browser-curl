@@ -52,7 +52,7 @@ export class CollectionsPanel {
   private deleteWarning = element('#collection-delete-warning')
   private pendingDelete: {collectionId: string; itemId: string; name: string} | undefined
   private exportWarning = element('#collection-export-warning')
-  private pendingExport: string | undefined
+  private pendingExport: {collectionId: string} | undefined
   private collapsed = new Set<string>()
   private renaming: {
     collectionId: string; itemId: string; name: string; input: HTMLInputElement; button: HTMLButtonElement
@@ -276,7 +276,8 @@ export class CollectionsPanel {
   }
 
   private showExport(collectionId: string, name: string): void {
-    this.pendingExport = collectionId
+    // A new prompt must never reactivate an earlier confirmation for the same collection.
+    this.pendingExport = {collectionId}
     this.error.hidden = true
     element('#collection-export-message').textContent = `The file for “${name}” contains saved credentials. Share it only with people you trust.`
     this.exportWarning.hidden = false
@@ -290,14 +291,14 @@ export class CollectionsPanel {
 
   /** A confirmation exports current storage, then downloads through a short-lived object URL. */
   private downloadCollection = async (): Promise<void> => {
-    const id = this.pendingExport
+    const pending = this.pendingExport
     const confirm = element<HTMLButtonElement>('#confirm-collection-export')
-    if (!id || confirm.disabled) return
+    if (!pending || confirm.disabled) return
     confirm.disabled = true
     this.error.hidden = true
     try {
-      const result = await exportCollection(id)
-      if (this.pendingExport !== id || !this.dialog.open || this.disposed) return
+      const result = await exportCollection(pending.collectionId)
+      if (this.pendingExport !== pending || !this.dialog.open || this.disposed) return
       const url = URL.createObjectURL(new Blob([result.json], {type: 'application/json'}))
       const link = document.createElement('a')
       try {
@@ -313,7 +314,7 @@ export class CollectionsPanel {
       }
       this.cancelExport()
     } catch {
-      if (this.pendingExport === id && this.dialog.open && !this.disposed) {
+      if (this.pendingExport === pending && this.dialog.open && !this.disposed) {
         this.showError('Could not export this collection. Try again.')
       }
     } finally {

@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict'
 import {readFileSync} from 'node:fs'
 import {test} from 'node:test'
+import postman from 'postman-collection'
 import {exportPostmanCollection, importPostmanCollection} from '../src/collections/postman-converter.ts'
 
 const schema = 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json'
@@ -13,6 +14,50 @@ function collection(item = [], extra = {}) {
 function exported(source) {
   return JSON.parse(exportPostmanCollection(source).json)
 }
+
+test('Postman SDK imports exported URL components and reconstructs the enabled URL without changing variables', () => {
+  for (const address of [
+    'https://example.com/health?kept=yes',
+    'http://localhost:8080/a%20b/nested/?kept=yes#section',
+    '{{baseUrl}}/v1/{{resource}}?kept={{value}}',
+    '{{protocol}}://{{sub.domain}}.example.com:{{port}}/{{path}}?kept={{value}}#{{fragment}}',
+    'https://[::1]:8443/health?kept=yes',
+    'https://example.com',
+    'https://example.com/'
+  ]) {
+    const source = collection([{name: 'URL', request: {url: address}}])
+    source.requests[0].editor.params.push({enabled: false, key: 'off', value: 'not-sent'})
+    const result = exported(source)
+    const url = new postman.Collection(result).items.idx(0).request.url
+    assert.equal(url.toString(), address)
+    assert.ok(url.getHost(), 'Postman must receive the host, not only raw text')
+    assert.equal(result.item[0].request.url.raw, address)
+    assert.equal(url.query.idx(url.query.count() - 1).disabled, true)
+  }
+})
+
+test('ignores blank Params placeholders just like sending a saved request', () => {
+  const source = collection([{name: 'Health', request: {url: 'https://example.com/health'}}])
+  source.requests[0].editor.params = [
+    {enabled: true, key: '', value: ''},
+    {enabled: true, key: '  ', value: 'ignored'},
+    {enabled: false, key: 'off', value: 'kept'}
+  ]
+  const result = exported(source)
+  assert.equal(result.item[0].request.url.raw, 'https://example.com/health')
+  assert.deepEqual(result.item[0].request.url.query, [{key: 'off', value: 'kept', disabled: true}])
+  assert.equal(new postman.Collection(result).items.idx(0).request.url.toString(), 'https://example.com/health')
+})
+
+test('preserves URL delimiters inside variable names when replacing the saved query', () => {
+  const source = collection([{name: 'Variables', request: {url: '{{baseUrl}}'}}])
+  source.requests[0].editor.url = '{{protocol}}://{{host.name}}:{{#port}}/{{p?ath}}?old=value#{{hash#}}'
+  source.requests[0].editor.params = [{enabled: true, key: 'kept', value: '{{v#?&}}'}]
+  const result = exported(source)
+  const expected = '{{protocol}}://{{host.name}}:{{#port}}/{{p?ath}}?kept={{v#?&}}#{{hash#}}'
+  assert.equal(result.item[0].request.url.raw, expected)
+  assert.equal(new postman.Collection(result).items.idx(0).request.url.toString(), expected)
+})
 
 test('exports v2.1 JSON with collection metadata, nested folders, and request order', () => {
   const source = collection([
@@ -53,6 +98,7 @@ test('keeps disabled rows and builds raw URL from enabled query rows without cha
     {key: 'literal%2Bpercent', value: '%2520', disabled: false}
   ])
   assert.equal(request.url.raw, '{{baseUrl}}/search?q={{term}}&tag=a%26b%3Dc%20%23%E2%9C%93&tag=second&literal%2Bpercent=%2520#section')
+  assert.equal(new postman.Collection(exported(source)).items.idx(0).request.url.toString(), request.url.raw)
   assert.deepEqual(request.header, [{key: 'X-On', value: '{{on}}', disabled: false}, {key: 'X-Off', value: 'kept', disabled: true}])
   assert.deepEqual(importPostmanCollection(exportPostmanCollection(source).json).collection.requests[0].editor, {...before, url: request.url.raw})
   assert.deepEqual(editor, before)
