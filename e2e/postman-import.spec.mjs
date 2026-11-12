@@ -94,6 +94,42 @@ async function importAndSend({extension, api}) {
 }
 test('imports a v2.1 file as a new expanded collection, shows warnings, and sends an inherited-auth request', importAndSend)
 
+test('sends imported object URLs with decoded query rows and preserved empty path segments', async ({extension, api}) => {
+  const panel = await extension.openPanel()
+  const origin = new URL(api.origin)
+  const query = [
+    {key: 'q', value: 'hello%20world'},
+    {key: 'encoded%20key', value: 'a%2Bb%26c%3Dd'},
+    {key: 'off%20key', value: 'not%20sent', disabled: true}
+  ]
+  const source = {
+    info: {name: 'URL regression API', schema: 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json'},
+    item: [
+      {name: 'Raw object query', request: {method: 'GET', url: {raw: `${api.origin}/echo?q=hello%20world&encoded%20key=a%2Bb%26c%3Dd`, query}}},
+      {name: 'Reconstructed object URL', request: {method: 'GET', url: {
+        protocol: 'http', host: origin.hostname, port: origin.port, path: ['', 'v1', 'widgets'], query
+      }}}
+    ]
+  }
+  await click(panel, '#show-collections')
+  await chooseFile(panel, JSON.stringify(source))
+  for (const [name, path] of [['Raw object query', '/echo'], ['Reconstructed object URL', '//v1/widgets']]) {
+    await panel.locator('[data-open-collection-request]').filter({hasText: name}).click()
+    await click(panel, '#params-tab')
+    const rows = panel.locator('#params-rows .entry-row')
+    await expect(rows).toHaveCount(3)
+    await expect(rows.nth(0).locator('[data-field="value"]')).toHaveValue('hello world')
+    await expect(rows.nth(1).locator('[data-field="key"]')).toHaveValue('encoded key')
+    await expect(rows.nth(1).locator('[data-field="value"]')).toHaveValue('a+b&c=d')
+    await expect(rows.nth(2).locator('[data-field="enabled"]')).not.toBeChecked()
+    await send(panel)
+    expect((await echoedRequest(panel)).url).toBe(`${path}?q=hello+world&encoded+key=a%2Bb%26c%3Dd`)
+    expect(api.requests.at(-1).url).toBe(`${path}?q=hello+world&encoded+key=a%2Bb%26c%3Dd`)
+    await capture(panel, path === '/echo' ? 'postman-object-query-sent' : 'postman-empty-path-segment-sent')
+    await click(panel, '#show-collections')
+  }
+})
+
 for (const [name, source, error] of [
   ['invalid JSON', '{invalid', 'not valid JSON'],
   ['Postman v1', '{"name":"Old collection","requests":[]}', 'Postman Collection v2.0 or v2.1'],

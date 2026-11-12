@@ -35,34 +35,40 @@ function headerRows(value: unknown): RequestEntry[] {
   })
 }
 
+/** Editor query rows hold decoded text; the request builder encodes them when sending. */
+function decodeQueryComponent(value: string): string {
+  try { return decodeURIComponent(value.replace(/\+/g, ' ')) } catch { return value }
+}
+
 /** Parse only the query text, so template hosts and relative addresses are never URL-validated. */
 function queryRows(address: string): RequestEntry[] {
   const [beforeHash] = address.split('#')
   const question = beforeHash.indexOf('?')
   if (question === -1) return []
-  const decode = (value: string): string => {
-    try { return decodeURIComponent(value.replace(/\+/g, ' ')) } catch { return value }
-  }
   return beforeHash.slice(question + 1).split('&').filter(Boolean).map((part) => {
     const equal = part.indexOf('=')
-    return {enabled: true, key: decode(equal === -1 ? part : part.slice(0, equal)), value: decode(equal === -1 ? '' : part.slice(equal + 1))}
+    return {enabled: true, key: decodeQueryComponent(equal === -1 ? part : part.slice(0, equal)), value: decodeQueryComponent(equal === -1 ? '' : part.slice(equal + 1))}
   })
 }
 
 function readUrl(value: unknown): {url: string; params: RequestEntry[]} {
   if (typeof value === 'string') return {url: value, params: queryRows(value)}
   const source = object(value)
+  const sourceQuery = rows(source.query)
+  const params = sourceQuery.map((row) => ({...row, key: decodeQueryComponent(row.key), value: decodeQueryComponent(row.value)}))
   if (typeof source.raw === 'string') {
-    return {url: source.raw, params: Array.isArray(source.query) ? rows(source.query) : queryRows(source.raw)}
+    return {url: source.raw, params: Array.isArray(source.query) ? params : queryRows(source.raw)}
   }
   const parts = (value: unknown, separator: string): string => Array.isArray(value)
     ? value.map((part) => typeof part === 'string' ? part : text(object(part).value)).join(separator) : text(value)
   const host = parts(source.host, '.')
   const path = parts(source.path, '/')
-  const params = rows(source.query)
-  const query = params.filter((row) => row.enabled).map(({key, value}) => `${key}=${value}`).join('&')
+  // Only string paths carry an optional leading separator; array entries are literal segments.
+  const addressPath = Array.isArray(source.path) ? `/${path}` : (path ? `/${path.replace(/^\//, '')}` : '')
+  // Reconstruct from the original text so decoded delimiters stay inside their query components.
+  const query = sourceQuery.filter((row) => row.enabled).map(({key, value}) => `${key}=${value}`).join('&')
   const url = (source.protocol ? `${text(source.protocol)}://` : '') + host
-    + (source.port ? `:${text(source.port)}` : '') + (path ? `/${path.replace(/^\//, '')}` : '') + (query ? `?${query}` : '')
+    + (source.port ? `:${text(source.port)}` : '') + addressPath + (query ? `?${query}` : '')
   return {url, params}
 }
 

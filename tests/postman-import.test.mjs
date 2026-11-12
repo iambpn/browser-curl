@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import {importPostmanCollection} from '../src/collections/postman-converter.ts'
+import {buildRequest} from '../src/requests/request.ts'
 
 function file(item = [], extra = {}, version = '2.1.0') {
   return JSON.stringify({
@@ -39,6 +40,56 @@ test('builds object URLs without raw from protocol, host, port, path, and enable
   assert.equal(editor.params[1].enabled, false)
   assert.equal(importedRequest({url: {host: '{{baseUrl}}', path: '/echo'}}).url, '{{baseUrl}}/echo')
   assert.equal(importedRequest('https://example.com/short?q=yes').params[0].value, 'yes')
+})
+
+test('normalizes query keys and values consistently across string and object URLs before sending', () => {
+  const query = [
+    {key: 'search%20term', value: 'hello%20world'},
+    {key: 'plus+key', value: 'a%2Bb+c'},
+    {key: 'reserved', value: 'a%26b%3Dc%23d'},
+    {key: 'unicode', value: '%E2%9C%93'},
+    {key: 'percent', value: '%2520'},
+    {key: 'malformed', value: '%ZZ'},
+    {key: 'template', value: '{{term}}'},
+    {key: 'search%20term', value: 'second'}
+  ]
+  const raw = `https://example.com/echo?${query.map(({key, value}) => `${key}=${value}`).join('&')}`
+  const expected = importedRequest({url: raw})
+  const disabled = {key: 'off%20key', value: 'off%20value', disabled: true}
+  for (const url of [
+    {raw},
+    {raw, query: [...query, disabled]},
+    {protocol: 'https', host: 'example.com', path: ['echo'], query: [...query, disabled]}
+  ]) {
+    const editor = importedRequest({url})
+    assert.equal(editor.url, raw)
+    assert.deepEqual(editor.params.filter((row) => row.enabled), expected.params)
+    if (url.query) assert.deepEqual(editor.params.at(-1), {enabled: false, key: 'off key', value: 'off value'})
+    const sent = buildRequest({...editor, authorization: {type: 'none'}}).url
+    assert.equal(sent.href, buildRequest({...expected, authorization: {type: 'none'}}).url.href)
+    assert.equal(sent.searchParams.get('search term'), 'hello world')
+    assert.equal(sent.searchParams.get('reserved'), 'a&b=c#d')
+    assert.equal(sent.searchParams.get('percent'), '%20')
+    assert.equal(sent.searchParams.get('template'), '{{term}}')
+    assert.equal(sent.searchParams.has('off key'), false)
+  }
+})
+
+test('preserves every path array segment when reconstructing object URLs', () => {
+  for (const [path, expectedPath] of [
+    [['', 'v1', 'widgets'], '//v1/widgets'],
+    [['', '', 'v1', '', 'widgets', ''], '///v1//widgets/'],
+    [[''], '/'],
+    [['', ''], '//'],
+    [[], '/'],
+    [['v1', '{{resource}}', ''], '/v1/{{resource}}/']
+  ]) {
+    const editor = importedRequest({url: {protocol: 'https', host: 'example.com', path}})
+    assert.equal(editor.url, `https://example.com${expectedPath}`)
+    if (!expectedPath.includes('{{')) {
+      assert.equal(buildRequest({...editor, authorization: {type: 'none'}}).url.pathname, expectedPath)
+    }
+  }
 })
 
 test('imports JSON and text raw bodies without replacing variable text', () => {
