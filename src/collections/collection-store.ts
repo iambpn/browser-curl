@@ -22,9 +22,6 @@ export interface Collection extends CollectionSummary {
 export const COLLECTION_INDEX_KEY = 'browsercurl.collectionIndex'
 export const COLLECTION_KEY_PREFIX = 'browsercurl.collection.'
 
-/** Serialize this panel's collection mutations, including reads used to build the next write. */
-let collectionWrites = Promise.resolve()
-
 /** Read the small collection index without reading editor values or credentials. */
 export async function listCollections(): Promise<CollectionSummary[]> {
   const items = await readStorage(COLLECTION_INDEX_KEY)
@@ -63,8 +60,8 @@ export function addCollectionRequest(
     index.push({id: collection.id, name})
     await writeStorage({[COLLECTION_KEY_PREFIX + collection.id]: collection, [COLLECTION_INDEX_KEY]: index})
   }
-  const mutation = collectionWrites.then(save)
-  // A failed save must not prevent the user from trying again.
-  collectionWrites = mutation.catch(() => {})
-  return mutation
+  // Web Locks serialize mutations across every panel on the extension origin. Use one lock
+  // for collections and their shared index, covering all reads through the completed write.
+  // The browser releases the lock on success, failure, or when the panel closes.
+  return navigator.locks.request(COLLECTION_INDEX_KEY, save)
 }

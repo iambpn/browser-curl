@@ -155,6 +155,65 @@ async function changesAcrossPanels({extension, api}) {
 }
 test('refreshes collections in another open panel and loads text bodies in a narrow dark panel', changesAcrossPanels)
 
+/** Delay one real storage read's result so concurrent saves reliably overlap before either writes. */
+function delayCollectionRead() {
+  const get = chrome.storage.local.get.bind(chrome.storage.local)
+  let delayed = false
+  chrome.storage.local.get = (keys, callback) => {
+    if (!delayed && typeof keys === 'string' && keys.startsWith('browsercurl.collection')) {
+      delayed = true
+      get(keys, (items) => setTimeout(() => callback(items), 500))
+    } else {
+      return get(keys, callback)
+    }
+  }
+}
+
+for (const destination of ['existing', 'new']) {
+  test(`keeps concurrent saves from separate panels in ${destination} collections`, async ({extension, api}) => {
+    const first = await extension.openPanel()
+    await fill(first, '#request-url', `${api.origin}/echo?seed=yes`)
+    await saveAs(first, 'Seed request', 'Shared collection')
+    const second = await extension.openPanel()
+    const panels = [first, second]
+    const names = ['First concurrent request', 'Second concurrent request']
+    const collectionNames = ['First collection', 'Second collection']
+    for (const [index, panel] of panels.entries()) {
+      await fill(panel, '#request-url', `${api.origin}/echo?panel=${index}`)
+      await click(panel, '#save-as')
+      await fill(panel, '#save-request-name', names[index])
+      if (destination === 'new') {
+        await panel.locator('#save-collection').selectOption('new')
+        await fill(panel, '#new-collection-name', collectionNames[index])
+      }
+      await expect(panel.locator('#confirm-save-as')).toBeEnabled()
+      await panel.evaluate(delayCollectionRead)
+    }
+    // Dispatch both clicks together, without Playwright's focus/actionability waits between panels.
+    await Promise.all(panels.map((panel) => panel.evaluate(() => document.querySelector('#confirm-save-as').click())))
+    for (const panel of panels) {
+      await expectHidden(panel, '#save-as-dialog')
+      await expectText(panel, '#collection-save-status', 'Request saved to collection.')
+    }
+    const saved = await first.evaluate(storedCollections)
+    expect(saved.index.map(({name}) => name).sort()).toEqual(
+      (destination === 'new' ? ['Shared collection', ...collectionNames] : ['Shared collection']).sort()
+    )
+    // Every stored collection must remain reachable from the index, including concurrent creations.
+    expect(saved.index.map(({id}) => id).sort()).toEqual(saved.collections.map(({id}) => id).sort())
+    const requests = saved.collections.flatMap(({requests}) => requests)
+    expect(requests.map(({editor}) => editor.name).sort()).toEqual(['Seed request', ...names].sort())
+    for (const [index, name] of names.entries()) {
+      expect(requests.find(({editor}) => editor.name === name).editor.url).toBe(`${api.origin}/echo?panel=${index}`)
+    }
+    for (const panel of panels) {
+      await click(panel, '#show-collections')
+      await expect(panel.locator('[data-collection-name]')).toHaveCount(saved.index.length)
+      await expect(panel.locator('[data-collection-request-name]')).toHaveCount(3)
+    }
+  })
+}
+
 /** Cancel without writing, and reject whitespace-only names without losing entered editor values. */
 async function saveFormValidation({extension, api}) {
   const panel = await extension.openPanel()
