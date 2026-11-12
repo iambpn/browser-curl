@@ -19,7 +19,7 @@
     "type": "native"
   },
   "setup": {
-    "installCommand": "npx --yes pnpm@12.4.1 install --frozen-lockfile && node_modules/.bin/playwright install chromium",
+    "installCommand": "npx --yes pnpm@12.4.1 install --frozen-lockfile && PLAYWRIGHT_BROWSERS_PATH=0 node_modules/.bin/playwright install chromium --no-shell",
     "copyToWorktree": ["node_modules"]
   },
   "checks": [
@@ -27,7 +27,7 @@
     { "name": "build", "command": "node_modules/.bin/extension build" },
     { "name": "type check", "command": "node_modules/.bin/tsc --noEmit" },
     { "name": "simulated browser test", "command": "node tests/browser/run.mjs" },
-    { "name": "e2e tests", "command": "node_modules/.bin/playwright test" }
+    { "name": "e2e tests", "command": "PLAYWRIGHT_BROWSERS_PATH=0 node_modules/.bin/playwright test" }
   ],
   "agents": {
     "implementer": {

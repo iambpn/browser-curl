@@ -38,6 +38,18 @@ The ticket belongs to this spec. Use the spec for context. Implement only the ti
 - Do not read or write files outside this repository.
 - Do not weaken a check to make it pass. Do not delete or skip a test unless the ticket asks for that.
 
+# Evidence
+
+The person who merges your work wants to see that it works without running it. Save the proof in the folder `.factory-evidence/`, and describe it in `{{EVIDENCE_FILE}}`. Git ignores that folder, so the proof never goes into a commit.
+
+- For a change that a user can see, such as a page, a form, or a message: start the app as `docs/agents/verification.md` explains. Take a screenshot for each acceptance criterion. Record a short video of each flow with several steps. Use Playwright or the browser tool that the project uses.
+- For a change with no screen, such as an API or a command: show the request and the response, or the command and its output, in a code block.
+- Save screenshots as PNG files and videos as MP4 or WebM files. Keep each file under 10 MB.
+- In `{{EVIDENCE_FILE}}`, write one short paragraph for each proof: what it shows, and which acceptance criterion it proves. Link each file with an image link relative to the folder, such as `![The login form shows the error](login-error.png)`. Put each video link alone in its own paragraph, such as `![](checkout-flow.webm)`, so that GitHub shows a player. Do not use headings.
+- Show only real results. Never edit a screenshot or invent output.
+
+If the app cannot run in the sandbox, say so in `{{EVIDENCE_FILE}}`, and show the test output that proves the change.
+
 # Before you finish
 
 The factory runner runs these commands after you finish. Each one must exit with code 0:

@@ -23,6 +23,7 @@ An earlier session implemented this ticket on the branch `{{SOURCE_BRANCH}}`. Th
 3. Reproduce the problem before you change code. Find its cause.
 4. Repair the cause. Do not hide the symptom.
 5. Keep the change small. Do not rewrite work that has no problem.
+6. If the repair changes what a user sees, update the screenshots, the videos, and `{{EVIDENCE_FILE}}`. Git ignores the `.factory-evidence/` folder, so do not commit it.
 
 # Rules of the sandbox
 

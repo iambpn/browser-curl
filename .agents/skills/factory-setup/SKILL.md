@@ -41,7 +41,7 @@ Ask every open question in one message. Give each question a recommended answer.
 
 - **Sandbox.** Recommend `native` (Bubblewrap on Linux, Seatbelt on macOS): no image, and it uses the tools of this machine. Recommend `docker` when a check needs a service, a system package, or root. Say this limit of `native`: the network stays open, so an agent can reach services on `localhost`.
 - **Agents.** Which agent implements and which agent reviews: `claude` or `codex`, and which model. Recommend a different model for the review than for the implementation. For a Codex role, read the model name from the `model` line of `~/.codex/config.toml`. Both agents can use a subscription in place of an API key: Claude through `claude setup-token`, and Codex through the ChatGPT login of `codex login`.
-- **Merge mode.** Only for the `github` tracker. Recommend `manual`: the factory opens pull requests and a person merges. `auto` merges a pull request when its GitHub checks pass. The `markdown` tracker always uses `manual`.
+- **Merge mode.** Only for the `github` tracker. It decides only the merges into the base branch: of a ticket on its own, and of the final pull request of a spec. Tickets of a spec always go into the spec branch at once. Recommend `manual`: a person merges into the base branch. `auto` merges when the GitHub checks pass. The `markdown` tracker always uses `manual`.
 - **Branch names.** Show the default: `feat/<ticket id>-<title words>`, with the prefix `bugfix`, `refactor`, or `chore` for tickets with that label. The ticket id is the issue number for GitHub, and `<feature>-<number>` for Markdown tickets, such as `feat/greetings-02-add-farewell`. Ask only if the project uses another convention.
 - **Parallel tickets.** Recommend 3.
 
@@ -51,7 +51,7 @@ Ask every open question in one message. Give each question a recommended answer.
 2. **`.sandcastle/Dockerfile`**, only for the `docker` sandbox. Add the runtimes and tools that the checks need. Then build the image: `npx --prefix .sandcastle sandcastle docker build-image --image-name <sandbox.imageName>`.
 3. **`.sandcastle/.env`.** If the file is missing, copy `.sandcastle/.env.example` to it. Tell the user which login each configured agent needs. The user fills in the values. Never ask the user to paste a token into the chat, and never read `.sandcastle/.env`. A Codex role needs no value if the user ran `codex login` with a ChatGPT account on this machine.
 4. **Labels.** For the `github` tracker only: create the queue label and the blocked label if GitHub lacks them: `gh label create <name>`. The `markdown` tracker uses these names as values of the `Status` line.
-5. **`docs/agents/verification.md`.** Write how to start the app, how to exercise it the way a user does, and what proof an agent can capture (test output, HTTP responses, screenshots, logs). Agents read this file before each ticket. Keep it short and exact.
+5. **`docs/agents/verification.md`.** Write how to start the app, how to exercise it the way a user does, and what proof an agent can capture (test output, HTTP responses, screenshots, logs). For an app with a screen, write the exact commands that take a screenshot and record a video in the sandbox, such as a small Playwright script. Prove the commands once in the sandbox type that the config uses. The browser must exist in the sandbox: add it to `.sandcastle/Dockerfile` for `docker`, or to `setup.installCommand` for `native` (the `native` sandbox hides the browser cache in your home folder). Agents read this file before each ticket. Keep it short and exact.
 6. **Agent instructions.** Add the section below to `CLAUDE.md` if it exists, else to `AGENTS.md`. If neither file exists, ask the user which one to create. Update the section in place if it already exists.
 
 ```markdown
@@ -111,5 +111,5 @@ Use this path when the folder holds no code.
 | `limits.maxParallel` | How many tickets run at the same time. |
 | `limits.implementIterations` | How many fresh sessions the implementer can use for one ticket. |
 | `limits.fixRounds` | How many times the implementer can repair failed checks or review findings. |
-| `merge.mode` | `manual` or `auto`. `auto` needs the `github` tracker. |
-| `merge.method` | `squash`, `merge`, or `rebase`. Used only by `auto`. |
+| `merge.mode` | `manual` or `auto`, for merges into the base branch. `auto` needs the `github` tracker. |
+| `merge.method` | `squash`, `merge`, or `rebase`. Used for every merge that the runner does on GitHub. |

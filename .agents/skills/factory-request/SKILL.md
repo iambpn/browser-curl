@@ -102,15 +102,17 @@ Check each ticket against these rules before it gets the queue label.
 
 - **Complete alone.** An agent that reads only the ticket and its spec can finish it. No decision is left open.
 - **Thin and whole.** The ticket cuts through every layer that the behavior needs, and a person can verify the result alone.
-- **Provable.** Each acceptance criterion names a result that a test or a command can show.
-- **Honest blockers.** `Blocked by` lists only tickets that must merge first. Two tickets that change the same files block each other. Put them in an order.
+- **Provable.** Each acceptance criterion names a result that a test, a command, or a screenshot can show. The implementer attaches that proof to the pull request.
+- **Honest blockers.** `Blocked by` lists only tickets that must merge first. Two tickets of one spec that change the same files can still run in parallel: the runner sends a conflict back to the implementer. Give them an order when one needs the code of the other.
 - **No file paths or code**, unless a snippet states a decision more exactly than words.
 
 ## 5. Hand over
 
 Show the user the list of tickets with their numbers, links or file paths, and blockers. Then say:
 
-- The factory starts tickets that have no open blocker. With GitHub, a ticket with a blocker waits until the pull request of the blocker is merged. With Markdown tickets, it waits until the runner pushes the branch of the blocker and sets the blocker to `done`. Merge that branch before the next run, because the waiting ticket starts from the base branch.
+- The factory starts tickets that have no open blocker.
+- **Tickets of a spec** (a GitHub parent issue, or a Markdown feature folder with `spec.md`): the runner merges each finished ticket into the spec branch at once, so a waiting ticket of the same spec starts in the same run. When every ticket of the spec is closed, the runner opens one final pull request with the evidence of every ticket.
+- **A ticket on its own**: with GitHub, a ticket that waits for it starts after its pull request is merged. With Markdown tickets, it starts after the runner pushes the branch and sets the ticket to `done`. Merge that branch before the next run, because the waiting ticket starts from the base branch.
 - The next step is the `factory-run` skill.
 
 Do not start the factory yourself unless the user asked for it.
