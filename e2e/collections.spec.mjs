@@ -30,7 +30,7 @@ async function saveAs(panel, name, collectionName) {
 async function saveAndReopen({extension, api}) {
   let panel = await extension.openPanel()
   await click(panel, '#show-collections')
-  await expectText(panel, '#collections-empty', 'No collections yet. Use Save as to save a request in a collection.')
+  await expectText(panel, '#collections-empty', 'No collections yet. Use New collection to create one, or Save as to save a request in a collection.')
   await captureEvidence(panel, 'collections-empty')
   await panel.keyboard.press('Escape')
   await expectHidden(panel, '#collections-dialog')
