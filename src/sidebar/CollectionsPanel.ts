@@ -60,7 +60,8 @@ export class CollectionsPanel {
     private readEditor: () => EditorState,
     private openEditor: (editor: EditorState, link: CollectionRequestLink) => void,
     private readLink: () => CollectionRequestLink | undefined,
-    private linkEditor: (link: CollectionRequestLink, name: string) => void
+    private linkEditor: (link: CollectionRequestLink, name: string) => void,
+    private readEditorRevision: () => number
   ) {
     element('#show-collections').addEventListener('click', this.show)
     element('#close-collections').addEventListener('click', () => this.dialog.close())
@@ -248,9 +249,12 @@ export class CollectionsPanel {
     this.confirm.disabled = true
     this.saveError.hidden = true
     try {
+      const editorRevision = this.readEditorRevision()
       const editor = {...this.readEditor(), name}
       const destination = isNew ? {name: collectionName} : {id: this.picker.value}
       const link = await addCollectionRequest(destination, editor)
+      // The snapshot is saved, but Clear or loading another request must keep its own editor and link.
+      if (this.disposed || editorRevision !== this.readEditorRevision()) return
       this.linkEditor(link, name)
       this.saveDialog.close()
       this.showSavedStatus()
@@ -280,6 +284,7 @@ export class CollectionsPanel {
       this.status.hidden = false
     } finally {
       this.saving = false
+      this.confirm.disabled = !this.pickerReady
     }
   }
 

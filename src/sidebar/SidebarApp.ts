@@ -166,6 +166,7 @@ class SidebarApp {
   private draftSaveTimer: ReturnType<typeof setTimeout> | undefined
   private draftBeforeHistory: PanelSnapshot | undefined
   private collectionRequest: CollectionRequestLink | undefined
+  private editorRevision = 0
   private collectionHeadingRevision = 0
   private responseId: string | undefined
   private responseRevision = 0
@@ -248,7 +249,7 @@ class SidebarApp {
     this.fitResponse()
     new CollectionsPanel(
       () => this.readEditorState(), this.openCollectionRequest,
-      () => this.collectionRequest, this.linkCollectionRequest
+      () => this.collectionRequest, this.linkCollectionRequest, () => this.editorRevision
     )
     void this.restoreWorkspace()
   }
@@ -785,6 +786,7 @@ class SidebarApp {
 
   /** Replace every editor value and update the dependent labels, counts, and fields. */
   private applyEditorState(state: EditorState): void {
+    this.editorRevision += 1
     this.requestName = state.name
     this.nameInput.hidden = true
     this.nameButton.hidden = false

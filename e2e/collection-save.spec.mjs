@@ -276,3 +276,104 @@ test('a rejected linked Save keeps the stored request and current edits for retr
   await expect.poll(async () => (await panel.evaluate(storedCollections)).collections[0].requests[0].editor.url)
     .toBe(`${api.origin}/echo?edited=yes`)
 })
+
+/** Hold the real collection write lock until the test explicitly releases it. */
+async function holdCollectionLock(panel) {
+  await panel.evaluate(() => new Promise((held) => {
+    window.collectionLock = navigator.locks.request('browsercurl.collectionIndex', () => new Promise((release) => {
+      window.releaseCollectionLock = release
+      held()
+    }))
+  }))
+}
+
+/** Wait until the user's save is queued, so the following editor action happens before completion. */
+async function expectPendingCollectionSave(panel) {
+  await expect.poll(() => panel.evaluate(async () => {
+    const {pending} = await navigator.locks.query()
+    return pending.some(({name}) => name === 'browsercurl.collectionIndex')
+  })).toBe(true)
+}
+
+/** Drain the queued write; UI assertions also wait for the save handler's completion. */
+async function releaseCollectionLock(panel) {
+  await panel.evaluate(async () => {
+    window.releaseCollectionLock()
+    await window.collectionLock
+    await navigator.locks.request('browsercurl.collectionIndex', () => {})
+  })
+}
+
+for (const action of ['cleared', 'replaced']) {
+  test(`a pending Save as cannot relink an editor that was ${action}`, async ({extension, api}) => {
+    const panel = await extension.openPanel()
+    await fill(panel, '#request-url', `${api.origin}/echo?original=yes`)
+    await saveAs(panel, 'Original request', 'Widget API')
+    await fill(panel, '#request-url', `${api.origin}/echo?other=yes`)
+    await saveAs(panel, 'Other request')
+    await load(panel, 'Original request')
+    const before = await panel.evaluate(storedCollections)
+
+    await holdCollectionLock(panel)
+    await click(panel, '#save-as')
+    await fill(panel, '#save-request-name', 'Pending copy')
+    await click(panel, '#confirm-save-as')
+    await expectPendingCollectionSave(panel)
+    await click(panel, '#cancel-save-as')
+    if (action === 'cleared') await click(panel, '#clear-request')
+    else await load(panel, 'Other request')
+    const currentUrl = action === 'cleared' ? '' : `${api.origin}/echo?other=yes`
+    const current = await savedWorkspaceWith(panel, 'url', currentUrl)
+
+    await releaseCollectionLock(panel)
+    await expect(panel.locator('#confirm-save-as')).toBeEnabled()
+    await expectText(panel, '#request-name', action === 'cleared' ? 'Untitled request' : 'Other request')
+    await expectValue(panel, '#request-url', currentUrl)
+    if (action === 'cleared') await expectHidden(panel, '#request-collection')
+    else await expectText(panel, '#request-collection', 'Widget API')
+    expect((await panel.evaluate(storedWorkspace)).draft.collectionRequest).toEqual(current.draft.collectionRequest)
+    const saved = await panel.evaluate(storedCollections)
+    expect(saved.collections[0].requests).toHaveLength(3)
+    expect(saved.collections[0].requests.slice(0, 2)).toEqual(before.collections[0].requests)
+    expect(saved.collections[0].requests[2].editor).toEqual({...before.collections[0].requests[0].editor, name: 'Pending copy'})
+
+    if (action === 'cleared') {
+      await click(panel, '#save-request')
+      await expectVisible(panel, '#save-as-dialog')
+      expect(await panel.evaluate(storedCollections)).toEqual(saved)
+    } else {
+      await fill(panel, '#request-url', `${api.origin}/echo?other=saved`)
+      await click(panel, '#save-request')
+      await expectText(panel, '#collection-save-status', 'Request saved to collection.')
+      saved.collections[0].requests[1].editor.url = `${api.origin}/echo?other=saved`
+      saved.collections[0].requests[1].editor.params[0].value = 'saved'
+      await expect.poll(() => panel.evaluate(storedCollections)).toEqual(saved)
+    }
+    await evidence(panel, `pending-save-as-editor-${action}`)
+  })
+}
+
+test('Save as becomes usable when a pending linked Save finishes', async ({extension, api}) => {
+  const panel = await extension.openPanel()
+  await fill(panel, '#request-url', `${api.origin}/echo?original=yes`)
+  await saveAs(panel, 'Original request', 'Widget API')
+  await fill(panel, '#request-url', `${api.origin}/echo?updated=yes`)
+  await holdCollectionLock(panel)
+  await click(panel, '#save-request')
+  await expectPendingCollectionSave(panel)
+  await click(panel, '#save-as')
+  await expect(panel.locator('#save-collection option')).toHaveText(['Widget API', 'New collection'])
+  await expect(panel.locator('#confirm-save-as')).toBeDisabled()
+
+  await releaseCollectionLock(panel)
+  await expectText(panel, '#collection-save-status', 'Request saved to collection.')
+  await fill(panel, '#save-request-name', 'Copy after Save')
+  await expect(panel.locator('#confirm-save-as')).toBeEnabled()
+  await evidence(panel, 'save-as-enabled-after-pending-save')
+  await click(panel, '#confirm-save-as')
+  await expectHidden(panel, '#save-as-dialog')
+  await expectText(panel, '#request-name', 'Copy after Save')
+  const {collections: [collection]} = await panel.evaluate(storedCollections)
+  expect(collection.requests.map(({editor}) => editor.name)).toEqual(['Original request', 'Copy after Save'])
+  expect(collection.requests.map(({editor}) => editor.url)).toEqual(Array(2).fill(`${api.origin}/echo?updated=yes`))
+})
