@@ -10,6 +10,7 @@ import type {HttpResultMessage} from '../requests/http-messages'
 import {
   HISTORY_INDEX_KEY, HISTORY_KEY_PREFIX, listHistorySummaries, loadSavedRequest, loadWorkspace, saveWorkspace
 } from '../history/request-store'
+import {CollectionsPanel} from './CollectionsPanel'
 import {resolveRequestName} from '../history/request-state'
 import type {EditorState, HistorySummary, PanelSnapshot, SavedRequest} from '../history/request-state'
 
@@ -242,6 +243,7 @@ class SidebarApp {
     this.updateMethod()
     this.updateAuthorization()
     this.fitResponse()
+    new CollectionsPanel(() => this.readEditorState(), this.openCollectionRequest)
     void this.restoreWorkspace()
   }
 
@@ -502,6 +504,18 @@ class SidebarApp {
     } catch {
       this.showHistoryError('Could not open this saved request. Try again.')
     }
+  }
+
+  /** Load all saved editor values and start with a fresh response through the usual send path. */
+  private openCollectionRequest = (editor: EditorState): void => {
+    this.draftBeforeHistory = undefined
+    this.responseId = undefined
+    this.responseRevision += 1
+    this.hideImportNotice()
+    this.resetResponse()
+    this.applyEditorState(editor)
+    this.updateWorkspaceLabel()
+    this.persistWorkspace()
   }
 
   /** Return from a history preview to the untouched draft and its saved response. */
@@ -1216,6 +1230,7 @@ class SidebarApp {
   private handleShortcut = (event: KeyboardEvent): void => {
     if (event.key !== 'Enter' || (!event.metaKey && !event.ctrlKey)) return
     event.preventDefault()
+    if (document.querySelector('dialog[open]')) return
     if (this.runningId) {
       void this.cancelRunningRequest()
       return
