@@ -1,6 +1,7 @@
-/** Read Postman files as plain data. Storage IDs and browser APIs belong to the collection store. */
+/** Convert Postman files as plain data. Local storage and downloads belong to the caller. */
 import type {EditorState} from '../history/request-state'
 import type {RequestEntry} from '../requests/request-types'
+import {parse as parsePostmanUrl} from 'postman-url-encoder/parser/index.js'
 
 export interface ImportedRequest {editor: EditorState}
 export interface ImportedFolder {name: string; requests: ImportedItem[]}
@@ -8,6 +9,75 @@ export type ImportedItem = ImportedRequest | ImportedFolder
 export interface ImportedCollection extends ImportedFolder {
   postmanId?: string
   variables?: unknown[]
+}
+
+/** Export one collection. Keep a newly generated Postman ID on the input for the caller to persist. */
+export function exportPostmanCollection(collection: ImportedCollection): {json: string; fileName: string} {
+  collection.postmanId ||= crypto.randomUUID()
+  const items = (children: ImportedItem[]): ObjectValue[] => children.map((item) => {
+    if ('requests' in item) return {name: item.name, item: items(item.requests)}
+    const editor = item.editor
+    // The editor's blank rows are placeholders; sending also ignores keys with no text.
+    const query = editor.params.filter(({key}) => key.trim()).map(({enabled, key, value}) => ({
+      key: encodeQueryComponent(key), value: encodeQueryComponent(value), disabled: !enabled
+    }))
+    const header = editor.headers
+      .filter(({key}) => editor.authType !== 'custom' || key.trim().toLowerCase() !== 'authorization')
+      .map(({enabled, key, value}) => ({key, value, disabled: !enabled}))
+    if (editor.authType === 'custom') {
+      header.push({key: 'Authorization', value: editor.authValues['custom-authorization'] ?? '', disabled: false})
+    }
+    // Query rows are authoritative, even when the URL field still has an older query string.
+    // Postman's SDK uses structured components, not raw, when reading a URL object.
+    // Its parser keeps variable references intact, including names containing URL delimiters.
+    const url = parsePostmanUrl(editor.url)
+    const hash = url.hash === undefined ? '' : `#${url.hash}`
+    const queryLength = url.query === undefined ? 0 : url.query.join('&').length + 1
+    const address = url.raw.slice(0, url.raw.length - hash.length - queryLength)
+    const search = query.filter(({disabled}) => !disabled).map(({key, value}) => `${key}=${value}`).join('&')
+    const raw = address + (search ? `?${search}` : '') + hash
+    return {name: editor.name, request: {
+      method: editor.method, url: {...url, raw, query,
+        ...(url.auth ? {auth: {user: url.auth[0], password: url.auth[1]}} : {})}, header,
+      body: {mode: 'raw', raw: editor.body, options: {raw: {language: editor.bodyType === 'json' ? 'json' : 'text'}}},
+      auth: exportAuth(editor)
+    }}
+  })
+  const output: ObjectValue = {
+    info: {name: collection.name, _postman_id: collection.postmanId, schema: 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json'},
+    item: items(collection.requests)
+  }
+  if (collection.variables !== undefined) output.variable = collection.variables
+  const name = collection.name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
+  return {json: JSON.stringify(output, null, 2), fileName: `${name}.postman_collection.json`}
+}
+
+/** Postman query text is encoded; leave variable references intact for Postman to resolve. */
+function encodeQueryComponent(value: string): string {
+  return value.split(/(\{\{[^{}]*\}\})/g).map((part, index) => index % 2 ? part : encodeURIComponent(part)).join('')
+}
+
+/** Export only the active credentials, never the editor's values for inactive types. */
+function exportAuth(editor: EditorState): ObjectValue {
+  const get = (key: string): string => editor.authValues[key] ?? ''
+  let type: string
+  let values: Record<string, string>
+  switch (editor.authType) {
+    case 'bearer':
+      type = 'bearer'
+      values = {token: get('bearer-token')}
+      break
+    case 'basic':
+      type = 'basic'
+      values = {username: get('basic-username'), password: get('basic-password')}
+      break
+    case 'api-key':
+      type = 'apikey'
+      values = {key: get('api-key-name'), value: get('api-key-value'), in: get('api-key-location') === 'query' ? 'query' : 'header'}
+      break
+    default: return {type: 'noauth'}
+  }
+  return {type, [type]: Object.entries(values).map(([key, value]) => ({key, value, type: 'string'}))}
 }
 
 type ObjectValue = Record<string, unknown>
