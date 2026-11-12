@@ -1,6 +1,6 @@
 /** Collections keep complete editor snapshots locally, independently of sent-request history. */
 import type {CollectionRequestLink, EditorState} from '../history/request-state'
-import {readStorage, writeStorage} from '../shared/storage'
+import {readStorage, removeStorage, writeStorage} from '../shared/storage'
 
 /** One entry in the collection index, in creation order. */
 export interface CollectionSummary {
@@ -14,9 +14,18 @@ export interface CollectionRequest {
   editor: EditorState
 }
 
-/** Requests are stored together under their collection's own storage key. */
+/** A folder's children keep insertion order, including folders nested to any depth. */
+export interface CollectionFolder {
+  id: string
+  name: string
+  requests: CollectionItem[]
+}
+
+export type CollectionItem = CollectionRequest | CollectionFolder
+
+/** The existing requests field now holds ordered requests and folders, preserving saved flat collections. */
 export interface Collection extends CollectionSummary {
-  requests: CollectionRequest[]
+  requests: CollectionItem[]
 }
 
 export const COLLECTION_INDEX_KEY = 'browsercurl.collectionIndex'
@@ -40,7 +49,7 @@ export async function loadCollection(id: string): Promise<Collection | undefined
  * The index and collection are written together so a rejected save never leaves an empty collection behind.
  */
 export function addCollectionRequest(
-  destination: {id: string} | {name: string}, editor: EditorState
+  destination: {id: string; folderId?: string} | {name: string}, editor: EditorState
 ): Promise<CollectionRequestLink> {
   const snapshot = structuredClone(editor)
   async function save(): Promise<CollectionRequestLink> {
@@ -49,7 +58,7 @@ export function addCollectionRequest(
     if ('id' in destination) {
       const collection = await loadCollection(destination.id)
       if (!collection) throw new Error('This collection is no longer available. Choose another collection.')
-      collection.requests.push(request)
+      childrenOf(collection, destination.folderId).push(request)
       await writeStorage({[COLLECTION_KEY_PREFIX + collection.id]: collection})
       return {collectionId: collection.id, requestId: request.id}
     }
@@ -72,11 +81,110 @@ export function updateCollectionRequest(link: CollectionRequestLink, editor: Edi
   const snapshot = structuredClone(editor)
   return navigator.locks.request(COLLECTION_INDEX_KEY, async () => {
     const collection = await loadCollection(link.collectionId)
-    const request = collection?.requests.find((request) => request.id === link.requestId)
+    const request = collection && findCollectionRequest(collection, link.requestId)
     if (!collection || !request) return false
     if (!snapshot.name.trim()) throw new Error('Enter a request name.')
     request.editor = snapshot
     await writeStorage({[COLLECTION_KEY_PREFIX + collection.id]: collection})
+    return true
+  })
+}
+
+/** Find an item at any depth without changing its siblings' order. */
+function findCollectionItem(collection: Collection | CollectionFolder, id: string): CollectionItem | undefined {
+  for (const item of collection.requests) {
+    if (item.id === id) return item
+    if ('requests' in item) {
+      const found = findCollectionItem(item, id)
+      if (found) return found
+    }
+  }
+}
+
+/** Resolve request links independently of the folder that currently contains them. */
+export function findCollectionRequest(collection: Collection, id: string): CollectionRequest | undefined {
+  const item = findCollectionItem(collection, id)
+  return item && 'editor' in item ? item : undefined
+}
+
+function childrenOf(collection: Collection, folderId?: string): CollectionItem[] {
+  if (!folderId) return collection.requests
+  const folder = findCollectionItem(collection, folderId)
+  if (!folder || !('requests' in folder)) throw new Error('This folder is no longer available.')
+  return folder.requests
+}
+
+/** Create an empty collection and its index entry under the shared write lock. */
+export function createCollection(name: string): Promise<void> {
+  return navigator.locks.request(COLLECTION_INDEX_KEY, async () => {
+    name = name.trim()
+    if (!name) throw new Error('Enter a collection name.')
+    const collection: Collection = {id: crypto.randomUUID(), name, requests: []}
+    const index = await listCollections()
+    index.push({id: collection.id, name})
+    await writeStorage({[COLLECTION_KEY_PREFIX + collection.id]: collection, [COLLECTION_INDEX_KEY]: index})
+  })
+}
+
+/** Append a folder to a collection or folder, preserving creation order. */
+export function addCollectionFolder(collectionId: string, name: string, folderId?: string): Promise<void> {
+  return navigator.locks.request(COLLECTION_INDEX_KEY, async () => {
+    name = name.trim()
+    if (!name) throw new Error('Enter a folder name.')
+    const collection = await loadCollection(collectionId)
+    if (!collection) throw new Error('This collection is no longer available.')
+    childrenOf(collection, folderId).push({id: crypto.randomUUID(), name, requests: []})
+    await writeStorage({[COLLECTION_KEY_PREFIX + collection.id]: collection})
+  })
+}
+
+/** Rename a collection, folder, or request without altering editor values or item order. */
+export function renameCollectionItem(collectionId: string, itemId: string, name: string): Promise<void> {
+  return navigator.locks.request(COLLECTION_INDEX_KEY, async () => {
+    name = name.trim()
+    if (!name) throw new Error('Enter a name.')
+    const collection = await loadCollection(collectionId)
+    if (!collection) throw new Error('This collection is no longer available.')
+    const item = itemId === collectionId ? collection : findCollectionItem(collection, itemId)
+    if (!item) throw new Error('This item is no longer available.')
+    if ('editor' in item) item.editor.name = name
+    else item.name = name
+    const writes: Record<string, unknown> = {[COLLECTION_KEY_PREFIX + collection.id]: collection}
+    if (item === collection) {
+      const index = await listCollections()
+      const summary = index.find(({id}) => id === collectionId)
+      if (summary) summary.name = name
+      writes[COLLECTION_INDEX_KEY] = index
+    }
+    await writeStorage(writes)
+  })
+}
+
+/** Recheck content under the lock so a concurrently filled container also needs confirmation. */
+export function deleteCollectionItem(collectionId: string, itemId: string, confirmed = false): Promise<boolean> {
+  return navigator.locks.request(COLLECTION_INDEX_KEY, async () => {
+    const collection = await loadCollection(collectionId)
+    if (!collection) return true
+    const item = itemId === collectionId ? collection : findCollectionItem(collection, itemId)
+    if (!item) return true
+    if ('requests' in item && item.requests.length && !confirmed) return false
+    if (item === collection) {
+      const index = (await listCollections()).filter(({id}) => id !== collectionId)
+      // Remove credentials before the index, matching history deletion.
+      await removeStorage(COLLECTION_KEY_PREFIX + collectionId)
+      await writeStorage({[COLLECTION_INDEX_KEY]: index})
+    } else {
+      const remove = (parent: Collection | CollectionFolder): boolean => {
+        const index = parent.requests.findIndex(({id}) => id === itemId)
+        if (index !== -1) {
+          parent.requests.splice(index, 1)
+          return true
+        }
+        return parent.requests.some((child) => 'requests' in child && remove(child))
+      }
+      remove(collection)
+      await writeStorage({[COLLECTION_KEY_PREFIX + collectionId]: collection})
+    }
     return true
   })
 }

@@ -1,8 +1,9 @@
 /** In-panel collection browsing and Save as forms. Collection writes stay in the side panel. */
 import {
-  addCollectionRequest, COLLECTION_INDEX_KEY, COLLECTION_KEY_PREFIX, listCollections, loadCollection, updateCollectionRequest
+  addCollectionFolder, addCollectionRequest, COLLECTION_INDEX_KEY, COLLECTION_KEY_PREFIX, createCollection,
+  deleteCollectionItem, findCollectionRequest, listCollections, loadCollection, renameCollectionItem, updateCollectionRequest
 } from '../collections/collection-store'
-import type {Collection, CollectionSummary} from '../collections/collection-store'
+import type {Collection, CollectionFolder, CollectionItem} from '../collections/collection-store'
 import type {CollectionRequestLink, EditorState} from '../history/request-state'
 import {resolveRequestName} from '../history/request-state'
 
@@ -47,6 +48,12 @@ export class CollectionsPanel {
   private confirm = element<HTMLButtonElement>('#confirm-save-as')
   private status = element('#collection-save-status')
   private warning = element('#collection-unsaved-warning')
+  private deleteWarning = element('#collection-delete-warning')
+  private pendingDelete: {collectionId: string; itemId: string; name: string} | undefined
+  private collapsed = new Set<string>()
+  private creatingIn: {collectionId: string; folderId?: string} | undefined
+  private createForm = element<HTMLFormElement>('#collection-item-form')
+  private createName = element<HTMLInputElement>('#collection-item-name')
   private pendingLoad: CollectionRequestLink | undefined
   private openRevision = 0
   private refresh = 0
@@ -71,6 +78,14 @@ export class CollectionsPanel {
     this.picker.addEventListener('change', this.updateNewCollection)
     this.form.addEventListener('submit', this.save)
     this.list.addEventListener('click', this.openRequest)
+    element('#new-collection').addEventListener('click', () => this.showCreate())
+    element('#cancel-collection-item').addEventListener('click', () => { this.createForm.hidden = true })
+    this.createForm.addEventListener('submit', this.createItem)
+    element('#cancel-collection-delete').addEventListener('click', this.cancelDelete)
+    element('#confirm-collection-delete').addEventListener('click', () => {
+      if (this.pendingDelete) void this.deleteItem(this.pendingDelete, true)
+    })
+    this.dialog.addEventListener('close', this.cancelDelete)
     element('#cancel-collection-load').addEventListener('click', this.cancelLoad)
     element('#discard-collection-changes').addEventListener('click', () => {
       if (this.pendingLoad) void this.loadRequest(this.pendingLoad, true)
@@ -83,6 +98,7 @@ export class CollectionsPanel {
   /** Open a fresh view of all saved collections. Native dialog Escape returns to the editor. */
   private show = (): void => {
     this.cancelLoad()
+    this.createForm.hidden = true
     this.dialog.showModal()
     void this.render()
   }
@@ -105,38 +121,174 @@ export class CollectionsPanel {
     }
   }
 
-  /** Build rows with textContent so saved names and methods never become HTML. */
+  /** Build a recursive tree using textContent for all saved names. */
   private collectionItem(collection: Collection): HTMLLIElement {
-    const item = document.createElement('li')
-    const heading = document.createElement('h3')
-    heading.dataset.collectionName = ''
-    heading.className = 'collection-name'
-    heading.textContent = collection.name
-    item.append(heading)
-    const requests = document.createElement('ul')
-    requests.className = 'history-list'
-    requests.setAttribute('aria-label', `${collection.name} requests`)
-    for (const request of collection.requests) {
-      const row = document.createElement('li')
-      const button = document.createElement('button')
-      button.type = 'button'
-      button.className = 'collection-request'
-      button.dataset.openCollectionRequest = request.id
+    return this.treeItem(collection, collection, 0)
+  }
+
+  private treeItem(collection: Collection, item: Collection | CollectionItem, depth: number): HTMLLIElement {
+    const node = document.createElement('li')
+    const row = document.createElement('div')
+    row.className = 'collection-row'
+    row.style.paddingLeft = `${12 + depth * 18}px`
+    const isRequest = 'editor' in item
+    const name = isRequest ? item.editor.name : item.name
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'collection-request'
+    if (isRequest) {
+      button.dataset.openCollectionRequest = item.id
       button.dataset.collectionId = collection.id
       const method = document.createElement('span')
       method.className = 'history-method'
       method.dataset.collectionMethod = ''
-      method.textContent = request.editor.method
-      const name = document.createElement('span')
-      name.className = 'history-name'
-      name.dataset.collectionRequestName = ''
-      name.textContent = request.editor.name
-      button.append(method, name)
-      row.append(button)
-      requests.append(row)
+      method.textContent = item.editor.method
+      button.append(method)
+    } else {
+      const collapsed = this.collapsed.has(item.id)
+      button.setAttribute('aria-expanded', String(!collapsed))
+      button.setAttribute('aria-label', `${collapsed ? 'Expand' : 'Collapse'} ${name}`)
+      const icon = document.createElement('span')
+      icon.textContent = collapsed ? '▸' : '▾'
+      icon.setAttribute('aria-hidden', 'true')
+      button.append(icon)
+      button.addEventListener('click', () => {
+        if (this.collapsed.has(item.id)) this.collapsed.delete(item.id)
+        else this.collapsed.add(item.id)
+        void this.render()
+      })
     }
-    item.append(requests)
-    return item
+    const label = document.createElement('span')
+    label.className = 'history-name'
+    label.dataset.itemName = ''
+    if (isRequest) label.dataset.collectionRequestName = ''
+    else if (item.id === collection.id) label.dataset.collectionName = ''
+    else label.dataset.folderName = ''
+    label.textContent = name
+    button.append(label)
+    row.append(button)
+    if (!isRequest) {
+      row.append(this.action('Add folder', () => this.showCreate(collection.id, item.id === collection.id ? undefined : item.id)))
+    }
+    row.append(this.action('Rename', () => this.renameItem(collection.id, item.id, name, row, button)))
+    row.append(this.action('Delete', () => { void this.deleteItem({collectionId: collection.id, itemId: item.id, name}) }))
+    node.append(row)
+    if (!isRequest) {
+      const children = document.createElement('ul')
+      children.className = 'collection-children'
+      children.hidden = this.collapsed.has(item.id)
+      children.setAttribute('aria-label', `${name} items`)
+      for (const child of item.requests) children.append(this.treeItem(collection, child, depth + 1))
+      node.append(children)
+    }
+    return node
+  }
+
+  private action(name: string, run: () => void): HTMLButtonElement {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'text-button collection-action'
+    button.textContent = name
+    button.addEventListener('click', run)
+    return button
+  }
+
+  /** Commit inline on blur or Enter, and restore the saved name on empty input or Escape. */
+  private renameItem(collectionId: string, itemId: string, name: string, row: HTMLElement, button: HTMLButtonElement): void {
+    if (row.querySelector('input')) return
+    const input = document.createElement('input')
+    input.className = 'auth-input collection-rename'
+    input.setAttribute('aria-label', 'Name')
+    input.value = name
+    button.hidden = true
+    row.prepend(input)
+    let cancelled = false
+    input.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== 'Escape') return
+      event.preventDefault()
+      cancelled = event.key === 'Escape'
+      input.blur()
+      button.focus()
+    })
+    input.addEventListener('blur', async () => {
+      const value = input.value.trim()
+      input.remove()
+      button.hidden = false
+      if (cancelled || value === name) return
+      if (!value) return this.showError('Enter a name.')
+      try {
+        await renameCollectionItem(collectionId, itemId, value)
+        await this.render()
+      } catch {
+        this.showError('Could not rename this item. Try again.')
+      }
+    }, {once: true})
+    input.focus()
+    input.select()
+  }
+
+  private cancelDelete = (): void => {
+    this.pendingDelete = undefined
+    this.deleteWarning.hidden = true
+  }
+
+  /** Recheck current storage before deciding whether a container needs confirmation. */
+  private async deleteItem(target: {collectionId: string; itemId: string; name: string}, confirmed = false): Promise<void> {
+    const confirm = element<HTMLButtonElement>('#confirm-collection-delete')
+    if (confirm.disabled) return
+    confirm.disabled = true
+    try {
+      const deleted = await deleteCollectionItem(target.collectionId, target.itemId, confirmed)
+      if (!this.dialog.open || this.disposed) return
+      if (!deleted) {
+        this.pendingDelete = target
+        element('#collection-delete-message').textContent = `Delete “${target.name}” and everything inside it?`
+        this.deleteWarning.hidden = false
+        element('#cancel-collection-delete').focus()
+      } else {
+        this.cancelDelete()
+        await this.render()
+      }
+    } catch {
+      this.showError('Could not delete this item. Try again.')
+    } finally {
+      confirm.disabled = false
+    }
+  }
+
+  private showCreate(collectionId?: string, folderId?: string): void {
+    this.creatingIn = collectionId ? {collectionId, folderId} : undefined
+    element('#collection-item-label').textContent = collectionId ? 'Folder name' : 'Collection name'
+    this.createName.value = ''
+    this.createForm.hidden = false
+    this.createName.focus()
+  }
+
+  private createItem = async (event: SubmitEvent): Promise<void> => {
+    event.preventDefault()
+    const name = this.createName.value.trim()
+    if (!name) return this.showError('Enter a name.')
+    const button = element<HTMLButtonElement>('#confirm-collection-item')
+    if (button.disabled) return
+    button.disabled = true
+    try {
+      const parent = this.creatingIn
+      if (parent) {
+        await addCollectionFolder(parent.collectionId, name, parent.folderId)
+        this.collapsed.delete(parent.folderId ?? parent.collectionId)
+      } else await createCollection(name)
+      this.createForm.hidden = true
+      await this.render()
+    } catch {
+      this.showError('Could not create this item. Try again.')
+    } finally {
+      button.disabled = false
+    }
+  }
+
+  private showError(message: string): void {
+    this.error.textContent = message
+    this.error.hidden = false
   }
 
   /** Reload the selected request at click time instead of opening a stale cached snapshot. */
@@ -151,7 +303,7 @@ export class CollectionsPanel {
     const revision = ++this.openRevision
     try {
       const collection = await loadCollection(link.collectionId)
-      const request = collection?.requests.find((request) => request.id === link.requestId)
+      const request = collection && findCollectionRequest(collection, link.requestId)
       if (!request) throw new Error('Request is no longer available.')
       const dirty = !discard && await this.hasUnsavedChanges()
       if (revision !== this.openRevision || !this.dialog.open || this.disposed) return
@@ -175,7 +327,7 @@ export class CollectionsPanel {
     const link = this.readLink()
     if (!link) return !isEmptyEditor(this.readEditor())
     const collection = await loadCollection(link.collectionId)
-    const request = collection?.requests.find((request) => request.id === link.requestId)
+    const request = collection && findCollectionRequest(collection, link.requestId)
     return !request || editorValues(request.editor) !== editorValues(this.readEditor())
   }
 
@@ -206,8 +358,9 @@ export class CollectionsPanel {
     this.confirm.disabled = true
     try {
       const index = await listCollections()
+      const collections = await Promise.all(index.map(({id}) => loadCollection(id)))
       if (refresh !== this.pickerRefresh || this.disposed) return
-      this.renderPicker(index, selected)
+      this.renderPicker(collections.filter((item): item is Collection => Boolean(item)), selected)
       this.pickerReady = true
       this.confirm.disabled = this.saving
     } catch {
@@ -218,11 +371,17 @@ export class CollectionsPanel {
   }
 
   /** Keep New collection selected on first use when the index is empty. */
-  private renderPicker(index: CollectionSummary[], selected: string): void {
-    const options = index.map((collection) => new Option(collection.name, collection.id))
+  private renderPicker(collections: Collection[], selected: string): void {
+    const options: HTMLOptionElement[] = []
+    const append = (collection: Collection, item: Collection | CollectionFolder, depth: number): void => {
+      const value = item.id === collection.id ? collection.id : `${collection.id}/${item.id}`
+      options.push(new Option('\u00a0\u00a0'.repeat(depth) + item.name, value))
+      for (const child of item.requests) if ('requests' in child) append(collection, child, depth + 1)
+    }
+    for (const collection of collections) append(collection, collection, 0)
     options.push(new Option('New collection', 'new'))
     this.picker.replaceChildren(...options)
-    if (selected === 'new' || index.some((collection) => collection.id === selected)) this.picker.value = selected
+    if (options.some((option) => option.value === selected)) this.picker.value = selected
     this.updateNewCollection()
   }
 
@@ -251,7 +410,8 @@ export class CollectionsPanel {
     try {
       const editorRevision = this.readEditorRevision()
       const editor = this.readEditor()
-      const destination = isNew ? {name: collectionName} : {id: this.picker.value}
+      const [id, folderId] = this.picker.value.split('/')
+      const destination = isNew ? {name: collectionName} : {id, folderId}
       const link = await addCollectionRequest(destination, {...editor, name})
       // The snapshot is saved, but Clear or loading another request must keep its own editor and link.
       if (this.disposed || editorRevision !== this.readEditorRevision()) return
@@ -303,7 +463,7 @@ export class CollectionsPanel {
     const changed = Object.keys(changes).some((key) => key === COLLECTION_INDEX_KEY || key.startsWith(COLLECTION_KEY_PREFIX))
     if (!changed) return
     if (this.dialog.open) void this.render()
-    if (changes[COLLECTION_INDEX_KEY] && this.saveDialog.open) void this.refreshPicker()
+    if (this.saveDialog.open) void this.refreshPicker()
   }
 
   /** Detach the collection listener when the side panel closes. */

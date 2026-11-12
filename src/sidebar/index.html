@@ -205,6 +205,15 @@
         <div><h2 id="collections-title">Collections</h2><p id="collections-description">Named requests, saved on this device.</p></div>
         <button id="close-collections" class="remove-button" type="button" aria-label="Close collections" title="Close collections" autofocus>×</button>
       </div>
+      <div class="collections-toolbar"><button id="new-collection" class="history-button" type="button">New collection</button></div>
+      <form id="collection-item-form" class="collection-item-form" hidden>
+        <label id="collection-item-label" class="field-label" for="collection-item-name">Collection name</label>
+        <input id="collection-item-name" class="auth-input" autocomplete="off" required />
+        <div class="save-as-actions">
+          <button id="cancel-collection-item" class="text-button" type="button">Cancel</button>
+          <button id="confirm-collection-item" class="history-button" type="submit">Create</button>
+        </div>
+      </form>
       <p id="collections-error" class="request-error" role="alert" hidden></p>
       <div id="collection-unsaved-warning" class="collection-unsaved-warning" role="alert" hidden>
         <p>You have unsaved changes. Discard them and load the selected request?</p>
@@ -213,7 +222,14 @@
           <button id="discard-collection-changes" class="history-button" type="button">Discard changes</button>
         </div>
       </div>
-      <p id="collections-empty" class="history-empty">No collections yet. Use Save as to save a request in a collection.</p>
+      <div id="collection-delete-warning" class="collection-unsaved-warning" role="alert" hidden>
+        <p id="collection-delete-message"></p>
+        <div class="save-as-actions">
+          <button id="cancel-collection-delete" class="text-button" type="button">Cancel</button>
+          <button id="confirm-collection-delete" class="history-button" type="button">Confirm delete</button>
+        </div>
+      </div>
+      <p id="collections-empty" class="history-empty">No collections yet. Use New collection to create one, or Save as to save a request in a collection.</p>
       <ul id="collections-list" class="history-list" aria-label="Collections"></ul>
     </dialog>
     <dialog id="save-as-dialog" class="history-dialog" aria-labelledby="save-as-title">
@@ -221,7 +237,7 @@
       <form id="save-as-form" class="save-as-form">
         <label class="field-label" for="save-request-name">Request name</label>
         <input id="save-request-name" class="auth-input" autocomplete="off" required autofocus />
-        <label class="field-label" for="save-collection">Collection</label>
+        <label class="field-label" for="save-collection">Collection or folder</label>
         <select id="save-collection" class="auth-input" required></select>
         <div id="new-collection-field" hidden>
           <label class="field-label" for="new-collection-name">New collection name</label>
