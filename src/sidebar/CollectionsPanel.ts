@@ -1,7 +1,7 @@
 /** In-panel collection browsing and Save as forms. Collection writes stay in the side panel. */
 import {
   addCollectionFolder, addCollectionRequest, COLLECTION_INDEX_KEY, COLLECTION_KEY_PREFIX, createCollection,
-  deleteCollectionItem, findCollectionRequest, listCollections, loadCollection, renameCollectionItem, saveImportedCollection, updateCollectionRequest
+  deleteCollectionItem, exportCollection, findCollectionRequest, listCollections, loadCollection, renameCollectionItem, saveImportedCollection, updateCollectionRequest
 } from '../collections/collection-store'
 import type {Collection, CollectionFolder, CollectionItem} from '../collections/collection-store'
 import type {CollectionRequestLink, EditorState} from '../history/request-state'
@@ -51,6 +51,8 @@ export class CollectionsPanel {
   private warning = element('#collection-unsaved-warning')
   private deleteWarning = element('#collection-delete-warning')
   private pendingDelete: {collectionId: string; itemId: string; name: string} | undefined
+  private exportWarning = element('#collection-export-warning')
+  private pendingExport: string | undefined
   private collapsed = new Set<string>()
   private renaming: {
     collectionId: string; itemId: string; name: string; input: HTMLInputElement; button: HTMLButtonElement
@@ -97,6 +99,9 @@ export class CollectionsPanel {
       if (this.pendingDelete) void this.deleteItem(this.pendingDelete, true)
     })
     this.dialog.addEventListener('close', this.cancelDelete)
+    element('#cancel-collection-export').addEventListener('click', this.cancelExport)
+    element('#confirm-collection-export').addEventListener('click', this.downloadCollection)
+    this.dialog.addEventListener('close', this.cancelExport)
     element('#cancel-collection-load').addEventListener('click', this.cancelLoad)
     element('#discard-collection-changes').addEventListener('click', () => {
       if (this.pendingLoad) void this.loadRequest(this.pendingLoad, true)
@@ -203,6 +208,7 @@ export class CollectionsPanel {
       row.append(this.action('Add folder', () => this.showCreate(collection.id, item.id === collection.id ? undefined : item.id)))
     }
     row.append(this.action('Rename', () => this.renameItem(collection.id, item.id, name, row, button)))
+    if (item.id === collection.id) row.append(this.action('Export', () => this.showExport(collection.id, name)))
     row.append(this.action('Delete', () => { void this.deleteItem({collectionId: collection.id, itemId: item.id, name}) }))
     node.append(row)
     if (!isRequest) {
@@ -267,6 +273,52 @@ export class CollectionsPanel {
   private cancelDelete = (): void => {
     this.pendingDelete = undefined
     this.deleteWarning.hidden = true
+  }
+
+  private showExport(collectionId: string, name: string): void {
+    this.pendingExport = collectionId
+    this.error.hidden = true
+    element('#collection-export-message').textContent = `The file for “${name}” contains saved credentials. Share it only with people you trust.`
+    this.exportWarning.hidden = false
+    element('#cancel-collection-export').focus()
+  }
+
+  private cancelExport = (): void => {
+    this.pendingExport = undefined
+    this.exportWarning.hidden = true
+  }
+
+  /** A confirmation exports current storage, then downloads through a short-lived object URL. */
+  private downloadCollection = async (): Promise<void> => {
+    const id = this.pendingExport
+    const confirm = element<HTMLButtonElement>('#confirm-collection-export')
+    if (!id || confirm.disabled) return
+    confirm.disabled = true
+    this.error.hidden = true
+    try {
+      const result = await exportCollection(id)
+      if (this.pendingExport !== id || !this.dialog.open || this.disposed) return
+      const url = URL.createObjectURL(new Blob([result.json], {type: 'application/json'}))
+      const link = document.createElement('a')
+      try {
+        link.href = url
+        link.download = result.fileName
+        link.hidden = true
+        document.body.append(link)
+        link.click()
+      } finally {
+        link.remove()
+        // Let the browser start reading the download before releasing the Blob.
+        setTimeout(() => URL.revokeObjectURL(url), 1000)
+      }
+      this.cancelExport()
+    } catch {
+      if (this.pendingExport === id && this.dialog.open && !this.disposed) {
+        this.showError('Could not export this collection. Try again.')
+      }
+    } finally {
+      confirm.disabled = false
+    }
   }
 
   /** Recheck current storage before deciding whether a container needs confirmation. */

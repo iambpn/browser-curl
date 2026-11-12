@@ -2,6 +2,7 @@
 import type {CollectionRequestLink, EditorState} from '../history/request-state'
 import {readStorage, removeStorage, writeStorage} from '../shared/storage'
 import type {ImportedCollection, ImportedItem} from './postman-converter'
+import {exportPostmanCollection} from './postman-converter'
 
 /** One entry in the collection index, in creation order. */
 export interface CollectionSummary {
@@ -60,6 +61,18 @@ export async function loadCollection(id: string): Promise<Collection | undefined
   const key = COLLECTION_KEY_PREFIX + id
   const items = await readStorage(key)
   return items[key] as Collection | undefined
+}
+
+/** Export the latest saved tree and persist its Postman ID before offering a download. */
+export function exportCollection(id: string): Promise<{json: string; fileName: string}> {
+  return navigator.locks.request(COLLECTION_INDEX_KEY, async () => {
+    const collection = await loadCollection(id)
+    if (!collection) throw new Error('This collection is no longer available.')
+    const savedId = collection.postmanId
+    const result = exportPostmanCollection(collection)
+    if (collection.postmanId !== savedId) await writeStorage({[COLLECTION_KEY_PREFIX + id]: collection})
+    return result
+  })
 }
 
 /**
