@@ -6,20 +6,29 @@
  *   <folder>/<feature>/issues/NN-<slug>.md one ticket
  *
  * A ticket file has a `Status:` line and a `Blocked by:` line near the top,
- * and comments under a `## Comments` heading at the end. The runner pushes
- * the branch of each finished ticket and marks the ticket done. A person
- * opens the pull request on the Git host.
+ * and comments under a `## Comments` heading at the end.
+ *
+ * A feature folder with a spec file is a spec. The runner merges each
+ * finished ticket of a spec into the spec branch on `origin`. When every
+ * ticket of the spec is done, the runner writes `pull-request.md` in the
+ * feature folder, and a person opens the pull request of the spec branch.
+ * For a feature folder with no spec file, the runner pushes the branch of
+ * each finished ticket, and a person opens its pull request.
+ *
+ * The runner copies the evidence of each ticket to
+ * `<folder>/<feature>/evidence/<ticket number>/`.
  */
 
 import { existsSync } from "node:fs";
-import { readdir, readFile, writeFile } from "node:fs/promises";
+import { cp, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { FactoryConfig } from "./config.mts";
+import { evidenceMarkdown, rewriteLinkTargets, type Evidence } from "./evidence.mts";
 import * as git from "./git.mts";
-import { blockedComment, workReport } from "./report.mts";
-import type { QueueView, Ticket } from "./tickets.mts";
-import { splitByBlockers } from "./tickets.mts";
-import type { ApprovedWork, Delivery, Tracker } from "./tracker.mts";
+import { blockedComment, specReport, workReport, type SpecPart } from "./report.mts";
+import type { QueueView, Spec, Ticket } from "./tickets.mts";
+import { specBranchName, splitByBlockers } from "./tickets.mts";
+import type { ApprovedWork, Delivery, SpecDelivery, Tracker } from "./tracker.mts";
 
 /**
  * The status that the runner writes when it pushes the branch of a ticket.
@@ -38,6 +47,25 @@ const TICKET_FILE_PATTERN = /^(\d+)(?:-[^/]*)?\.md$/;
 
 /** The heading that starts the comments of a ticket file. */
 const COMMENTS_HEADING = "## Comments";
+
+/** The heading text that starts each comment of the runner, before the time. */
+const RUNNER_COMMENT_HEADING = "### Software factory";
+
+/** The folder in a feature folder that holds the evidence of each ticket. */
+const EVIDENCE_FOLDER_NAME = "evidence";
+
+/** The file in a feature folder with the pull request text of a finished spec. */
+const PULL_REQUEST_FILE_NAME = "pull-request.md";
+
+/** Where the file of one ticket lives. */
+interface TicketLocation {
+  /** Absolute path of the ticket file. */
+  readonly filePath: string;
+  /** Absolute path of the feature folder. */
+  readonly featureDir: string;
+  /** The number at the start of the file name, as written, such as `02`. */
+  readonly numberText: string;
+}
 
 /** One ticket file, read from disk. */
 export interface TicketFile {
@@ -59,14 +87,14 @@ export interface TicketFile {
  *
  * @param files Every ticket file of every feature.
  * @param queueStatus The status that marks a ticket as ready for an agent.
- * @param specPaths The spec file path of each feature that has one.
+ * @param specs The spec of each feature that has a spec file, by feature name.
  * @returns The ready and the waiting tickets, sorted by feature and number.
  * @throws Error if two files of one feature have the same number.
  */
 export function buildMarkdownQueue(
   files: readonly TicketFile[],
   queueStatus: string,
-  specPaths: ReadonlyMap<string, string>,
+  specs: ReadonlyMap<string, Spec>,
 ): QueueView {
   const filesByKey = indexByFeatureAndNumber(files);
   const filesInOrder = [...files].sort(byFeatureAndNumber);
@@ -75,8 +103,8 @@ export function buildMarkdownQueue(
   for (const file of filesInOrder) {
     const status = readField(file.text, "Status");
     if (status === queueStatus) {
-      const specPath = specPaths.get(file.feature) ?? null;
-      tickets.push(toTicket(file, filesByKey, specPath));
+      const spec = specs.get(file.feature) ?? null;
+      tickets.push(toTicket(file, filesByKey, spec));
     }
   }
   return splitByBlockers(tickets);
@@ -190,7 +218,35 @@ export function appendComment(text: string, comment: string, time: string): stri
   const hasComments = findCommentsLine(lines) !== -1;
   const commentsHeading = hasComments ? "" : `${COMMENTS_HEADING}\n\n`;
   const content = text.trimEnd();
-  return `${content}\n\n${commentsHeading}### Software factory, ${time}\n\n${comment.trim()}\n`;
+  return `${content}\n\n${commentsHeading}${RUNNER_COMMENT_HEADING}, ${time}\n\n${comment.trim()}\n`;
+}
+
+/**
+ * Reads the last comment that the runner added to a ticket file.
+ *
+ * @param text The text of a ticket file.
+ * @returns The text after the last runner comment heading, or `null` if the file has none.
+ */
+export function lastRunnerComment(text: string): string | null {
+  const headingIndex = text.lastIndexOf(`\n${RUNNER_COMMENT_HEADING}, `);
+  if (headingIndex === -1) {
+    return null;
+  }
+  const headingEnd = text.indexOf("\n", headingIndex + 1);
+  return headingEnd === -1 ? "" : text.slice(headingEnd + 1).trim();
+}
+
+/**
+ * Reads the title of a spec from its first `#` heading.
+ *
+ * @param text The text of a spec file.
+ * @param feature The feature folder name, used when the file has no heading.
+ * @returns The heading text, such as `Greetings`.
+ */
+export function specTitle(text: string, feature: string): string {
+  const heading = /^#\s+(.+)$/m.exec(text);
+  const headingText = heading?.[1]?.trim() ?? "";
+  return headingText === "" ? feature : headingText;
 }
 
 /**
@@ -217,8 +273,8 @@ class MarkdownTracker implements Tracker {
   readonly #config: FactoryConfig;
   /** Absolute path of the ticket folder. */
   readonly #ticketsRoot: string;
-  /** The absolute file path of each ticket of the last queue read, by ticket id. */
-  readonly #pathsById = new Map<string, string>();
+  /** Where the file of each ticket of the last queue read lives, by ticket id. */
+  readonly #locationsById = new Map<string, TicketLocation>();
 
   /**
    * Creates the tracker. It reads no file until the runner asks for the queue.
@@ -241,7 +297,7 @@ class MarkdownTracker implements Tracker {
   async readQueue(): Promise<QueueView> {
     const features = await listFolders(this.#ticketsRoot);
     const files: TicketFile[] = [];
-    const specPaths = new Map<string, string>();
+    const specs = new Map<string, Spec>();
 
     for (const feature of features) {
       const featureDir = path.join(this.#ticketsRoot, feature);
@@ -250,15 +306,15 @@ class MarkdownTracker implements Tracker {
       for (const file of featureFiles) {
         const id = `${feature}-${file.numberText}`;
         const filePath = path.join(featureDir, TICKETS_FOLDER_NAME, file.fileName);
-        this.#pathsById.set(id, filePath);
+        this.#locationsById.set(id, { filePath, featureDir, numberText: file.numberText });
       }
 
-      const specPath = path.join(featureDir, SPEC_FILE_NAME);
-      if (existsSync(specPath)) {
-        specPaths.set(feature, specPath);
+      const spec = await this.#readFeatureSpec(feature);
+      if (spec !== null) {
+        specs.set(feature, spec);
       }
     }
-    return buildMarkdownQueue(files, this.#config.labels.queue, specPaths);
+    return buildMarkdownQueue(files, this.#config.labels.queue, specs);
   }
 
   /**
@@ -268,10 +324,10 @@ class MarkdownTracker implements Tracker {
    * @returns The spec text, or a note that the ticket has no spec.
    */
   async readSpec(ticket: Ticket): Promise<string> {
-    if (ticket.specLocation === null) {
+    if (ticket.spec === null) {
       return "This ticket has no spec. The ticket text is the full request.";
     }
-    return readFile(ticket.specLocation, "utf8");
+    return readFile(ticket.spec.location, "utf8");
   }
 
   /**
@@ -284,19 +340,75 @@ class MarkdownTracker implements Tracker {
   }
 
   /**
-   * Pushes the ticket branch, sets the ticket status to done, and adds the work report as a comment.
+   * Delivers an approved ticket, copies its evidence next to the ticket
+   * file, sets the ticket status to done, and adds the work report as a comment.
+   *
+   * A ticket of a spec: the runner merges the ticket branch into the spec
+   * branch on `origin`. A ticket on its own: the runner pushes the ticket branch.
    *
    * @param ticket The approved ticket.
    * @param branch The local branch with the commits.
-   * @param work The review and the check results.
-   * @returns A `pushed` delivery.
+   * @param work The review, the check results, and the evidence.
+   * @returns `merged` for a ticket of a spec, else `pushed`.
    */
   async deliver(ticket: Ticket, branch: string, work: ApprovedWork): Promise<Delivery> {
-    await git.pushBranch(branch);
-    const report = workReport(work.review, work.checks, 4);
-    const comment = `The software factory pushed the branch \`${branch}\` to \`origin\`. Open a pull request for it.\n\n${report}`;
-    await this.#updateTicketFile(ticket, DONE_STATUS, comment);
-    return { status: "pushed", branch };
+    const location = this.#locationOf(ticket);
+    let delivery: Delivery;
+    let opening: string;
+    if (ticket.spec === null) {
+      await git.pushBranch(branch);
+      delivery = { status: "pushed", branch, note: "" };
+      opening = `The software factory pushed the branch \`${branch}\` to \`origin\`. Open a pull request for it.`;
+    } else {
+      const message = `Merge ${ticket.reference}: ${ticket.title}`;
+      await git.mergeIntoRemoteBranch(branch, ticket.spec.branch, message);
+      delivery = { status: "merged", url: null, target: ticket.spec.branch };
+      opening = `The software factory merged the branch \`${branch}\` into the spec branch \`${ticket.spec.branch}\` on \`origin\`.`;
+    }
+
+    const evidenceText = await copyEvidence(work.evidence, location);
+    const report = workReport({ ...work, evidenceText }, 4);
+    await this.#updateTicketFile(ticket, DONE_STATUS, `${opening}\n\n${report}`);
+    return delivery;
+  }
+
+  /**
+   * Writes `pull-request.md` for each spec whose tickets are all done.
+   *
+   * A spec is finished when its feature folder has a spec file and at least
+   * one ticket, every ticket is done, `origin` has its spec branch, and the
+   * folder has no `pull-request.md` yet.
+   *
+   * @returns A `pushed` delivery for each finished spec.
+   */
+  async deliverFinishedSpecs(): Promise<SpecDelivery[]> {
+    const features = await listFolders(this.#ticketsRoot);
+    const remoteBranches = await git.listRemoteBranches();
+    const deliveries: SpecDelivery[] = [];
+
+    for (const feature of features) {
+      const spec = await this.#readFeatureSpec(feature);
+      if (spec === null || !remoteBranches.includes(spec.branch)) {
+        continue;
+      }
+      const featureDir = path.join(this.#ticketsRoot, feature);
+      const pullRequestPath = path.join(featureDir, PULL_REQUEST_FILE_NAME);
+      const files = await readTicketFiles(featureDir, feature);
+      const allDone = files.every(isDone);
+      if (files.length === 0 || !allDone || existsSync(pullRequestPath)) {
+        continue;
+      }
+
+      const sortedFiles = [...files].sort(byFeatureAndNumber);
+      const parts = sortedFiles.map(specPartOf);
+      const report = specReport(spec, parts);
+      await writeFile(pullRequestPath, `# ${spec.title}\n\n${report}\n`);
+
+      const relativePath = path.relative(process.cwd(), pullRequestPath);
+      const note = `Open a pull request from ${spec.branch} to ${this.#config.baseBranch} with the text of ${relativePath}. Attach the files of its evidence folder.`;
+      deliveries.push({ spec, status: "pushed", branch: spec.branch, note });
+    }
+    return deliveries;
   }
 
   /**
@@ -323,15 +435,104 @@ class MarkdownTracker implements Tracker {
    * @throws Error if the ticket was not in the last queue read.
    */
   async #updateTicketFile(ticket: Ticket, status: string, comment: string): Promise<void> {
-    const filePath = this.#pathsById.get(ticket.id);
-    if (filePath === undefined) {
-      throw new Error(`The runner has no file for ticket ${ticket.reference}.`);
-    }
+    const { filePath } = this.#locationOf(ticket);
     const text = await readFile(filePath, "utf8");
     const withStatus = setStatus(text, status);
     const updated = appendComment(withStatus, comment, currentTime());
     await writeFile(filePath, updated);
   }
+
+  /**
+   * Finds the file of a ticket from the last queue read.
+   *
+   * @param ticket The ticket.
+   * @returns Where the ticket file lives.
+   * @throws Error if the ticket was not in the last queue read.
+   */
+  #locationOf(ticket: Ticket): TicketLocation {
+    const location = this.#locationsById.get(ticket.id);
+    if (location === undefined) {
+      throw new Error(`The runner has no file for ticket ${ticket.reference}.`);
+    }
+    return location;
+  }
+
+  /**
+   * Reads the spec of a feature folder.
+   *
+   * @param feature The feature folder name.
+   * @returns The spec, or `null` if the folder has no spec file.
+   */
+  async #readFeatureSpec(feature: string): Promise<Spec | null> {
+    const specPath = path.join(this.#ticketsRoot, feature, SPEC_FILE_NAME);
+    if (!existsSync(specPath)) {
+      return null;
+    }
+    const specText = await readFile(specPath, "utf8");
+    return {
+      id: feature,
+      reference: feature,
+      title: specTitle(specText, feature),
+      location: specPath,
+      branch: specBranchName(feature, "", this.#config.branch),
+    };
+  }
+}
+
+/**
+ * Copies the evidence files of a ticket to `<feature>/evidence/<number>/`.
+ *
+ * @param evidence The proof of the ticket.
+ * @param location Where the ticket file lives.
+ * @returns The Evidence section text, with links relative to the ticket file.
+ */
+async function copyEvidence(evidence: Evidence, location: TicketLocation): Promise<string> {
+  const targetDir = path.join(location.featureDir, EVIDENCE_FOLDER_NAME, location.numberText);
+  for (const filePath of evidence.files) {
+    const relativePath = path.relative(evidence.folder, filePath);
+    const targetPath = path.join(targetDir, relativePath);
+    await mkdir(path.dirname(targetPath), { recursive: true });
+    await cp(filePath, targetPath);
+  }
+  const linkPrefix = `../${EVIDENCE_FOLDER_NAME}/${location.numberText}/`;
+  return evidenceMarkdown(evidence, linkPrefix);
+}
+
+/**
+ * Builds the part of one ticket for the pull request text of its spec.
+ *
+ * The links of the ticket comment are relative to the `issues/` folder.
+ * The pull request text sits one folder higher, so the runner removes the leading `../`.
+ *
+ * @param file A done ticket file.
+ * @returns The title and the last runner comment of the ticket.
+ */
+function specPartOf(file: TicketFile): SpecPart {
+  const comment = lastRunnerComment(file.text) ?? "";
+  const report = rewriteLinkTargets(comment, withoutParentStep);
+  const title = ticketTitle(file.text, file.fileName);
+  return { title: `${file.numberText}: ${title}`, link: null, report };
+}
+
+/**
+ * Checks whether a ticket file has the done status.
+ *
+ * @param file A ticket file.
+ * @returns `true` if its status is {@link DONE_STATUS}.
+ */
+function isDone(file: TicketFile): boolean {
+  const status = readField(file.text, "Status");
+  return status === DONE_STATUS;
+}
+
+/**
+ * Removes a leading `../` from a link target.
+ *
+ * @param target A link target, such as `../evidence/01/shot.png`.
+ * @returns The target one folder higher, such as `evidence/01/shot.png`.
+ */
+function withoutParentStep(target: string): string {
+  return target.replace(/^\.\.\//, "");
 }
 
 /**
@@ -339,13 +540,13 @@ class MarkdownTracker implements Tracker {
  *
  * @param file A ticket file with the queue status.
  * @param filesByKey Every ticket file, by `<feature>/<number>`.
- * @param specPath The spec file of the feature, or `null`.
+ * @param spec The spec of the feature, or `null`.
  * @returns The ticket. `waitingOn` holds the blockers that are not done.
  */
 function toTicket(
   file: TicketFile,
   filesByKey: ReadonlyMap<string, TicketFile>,
-  specPath: string | null,
+  spec: Spec | null,
 ): Ticket {
   const ownNumber = Number(file.numberText);
   const blockedBy = readField(file.text, "Blocked by") ?? "";
@@ -376,7 +577,7 @@ function toTicket(
     title: ticketTitle(file.text, file.fileName),
     body: file.text,
     labels,
-    specLocation: specPath,
+    spec,
     waitingOn,
   };
 }

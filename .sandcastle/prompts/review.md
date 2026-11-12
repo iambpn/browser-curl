@@ -30,6 +30,12 @@ Do not edit, commit, or push anything. You only read and run commands.
 - Look for cases that the tests miss: empty input, errors, limits.
 - Where you can, prove behavior yourself. Run the relevant test or the command from `docs/agents/verification.md`.
 
+**Evidence.** Does the proof show that the change works?
+
+- Read `{{EVIDENCE_FILE}}` and open every file that it links to. You can view images. For a video, read its file name and size, and judge it from the text around it.
+- Check that each proof matches the ticket and the code. Proof that does not match the code is a defect.
+- A change that a user can see needs a screenshot or a video. A change with no screen needs command output or test output. If the app cannot run in the sandbox, test output is enough.
+
 **Standards.** Does the change follow the project?
 
 - Compare the change with the standards that you read. A written project standard wins over your own taste.
@@ -39,7 +45,7 @@ Do not edit, commit, or push anything. You only read and run commands.
 
 # Your verdict
 
-Reject the change if an acceptance criterion is not met, if a check was weakened, or if you found a defect. Do not reject for taste alone. Put small remarks in `findings` and approve.
+Reject the change if an acceptance criterion is not met, if a check was weakened, if the evidence is missing or does not match the change, or if you found a defect. Do not reject for taste alone. Put small remarks in `findings` and approve.
 
 Print your verdict as JSON inside `<review>` tags. Print the tags one time, at the end.
 

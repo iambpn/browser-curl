@@ -86,10 +86,15 @@ const configSchema = z.object({
   }),
   merge: z.object({
     /**
-     * `manual` leaves each pull request open for a person to merge.
-     * `auto` merges a pull request when its GitHub checks pass. It needs the `github` tracker.
+     * Decides the merges into the base branch: of a ticket with no spec, and
+     * of the final pull request of a spec. A ticket of a spec always goes into
+     * the spec branch at once.
+     *
+     * `manual` leaves each pull request to the base branch open for a person to merge.
+     * `auto` merges it when its GitHub checks pass. It needs the `github` tracker.
      */
     mode: z.enum(["manual", "auto"]),
+    /** How the runner merges on GitHub, into the base branch and into spec branches. */
     method: z.enum(["squash", "merge", "rebase"]),
   }),
 });

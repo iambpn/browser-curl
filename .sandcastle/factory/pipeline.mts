@@ -1,6 +1,10 @@
 /**
- * Takes one ticket from the queue to its end: a pull request, a merged pull
- * request, a pushed branch, or a ticket handed back to a person.
+ * Takes one ticket from the queue to its end: a pull request, a merge, a
+ * pushed branch, or a ticket handed back to a person.
+ *
+ * A ticket of a spec starts from the spec branch and goes back into it. The
+ * runner delivers one ticket of a spec at a time, so it can check each
+ * ticket for conflicts with the newest spec branch first.
  *
  * Agents work only inside the sandbox. This module runs the project checks
  * itself. The tracker does every action on the ticket, on the host machine.
@@ -11,7 +15,14 @@ import path from "node:path";
 import * as sandcastle from "@ai-hero/sandcastle";
 import { copyCodexLoginIn, saveRefreshedCodexLogin } from "./codexLogin.mts";
 import type { CheckConfig, FactoryConfig } from "./config.mts";
+import {
+  collectEvidence,
+  EVIDENCE_FILE,
+  EVIDENCE_FOLDER,
+  prepareEvidenceFolder,
+} from "./evidence.mts";
 import * as git from "./git.mts";
+import type { KeyedLock } from "./keyedLock.mts";
 import {
   describeFailedChecks,
   parseReview,
@@ -36,7 +47,7 @@ const INSTALL_TIMEOUT_MS = 600_000;
 /** What every ticket of one runner start shares. */
 export interface PipelineContext {
   readonly config: FactoryConfig;
-  /** The ref that new ticket branches start from, such as `origin/main`. */
+  /** The ref that new ticket branches without a spec start from, such as `origin/main`. */
   readonly baseRef: string;
   /** Absolute path of the project root. */
   readonly projectRoot: string;
@@ -48,6 +59,8 @@ export interface PipelineContext {
   readonly tracker: Tracker;
   /** The ChatGPT login file of Codex to copy into each sandbox, or `null`. */
   readonly codexLoginPath: string | null;
+  /** Lets only one ticket of a spec at a time create or change the spec branch. Its keys are spec branch names. */
+  readonly specBranchLock: KeyedLock;
 }
 
 /**
@@ -64,8 +77,14 @@ export type TicketOutcome =
 
 /** The result of the sandbox part of the pipeline. */
 type SandboxWork =
-  | ({ readonly approved: true } & ApprovedWork)
-  | { readonly approved: false; readonly reason: string };
+  | { readonly delivered: true; readonly delivery: Delivery }
+  | { readonly delivered: false; readonly reason: string };
+
+/** The result of an attempt to deliver approved work. */
+type DeliveryAttempt =
+  | { readonly status: "delivered"; readonly delivery: Delivery }
+  /** The ticket branch conflicts with `targetRef`, the newest spec branch. */
+  | { readonly status: "conflict"; readonly targetRef: string };
 
 /**
  * Works on one ticket until it has an outcome.
@@ -87,40 +106,76 @@ export async function runTicket(ticket: Ticket, context: PipelineContext): Promi
   let work: SandboxWork;
   try {
     const spec = await tracker.readSpec(ticket);
-    work = await workInSandbox(ticket, branch, spec, context);
+    const startRef = await startRefFor(ticket, context);
+    work = await workInSandbox(ticket, branch, spec, startRef, context);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    work = { approved: false, reason: `The runner hit an error:\n\n${message}` };
+    work = { delivered: false, reason: `The runner hit an error:\n\n${message}` };
   }
 
-  if (!work.approved) {
+  if (!work.delivered) {
     await tracker.handBack(ticket, branch, work.reason);
     return { status: "blocked", ticket, reason: work.reason };
   }
-  const delivery = await tracker.deliver(ticket, branch, work);
-  return { ...delivery, ticket };
+  return { ...work.delivery, ticket };
+}
+
+/**
+ * Finds the ref that a new ticket branch starts from.
+ *
+ * For a ticket of a spec, the runner creates the spec branch on `origin`
+ * from the base branch if it does not exist yet.
+ *
+ * @param ticket The ticket.
+ * @param context What every ticket of this runner start shares.
+ * @returns The newest spec branch, such as `origin/feat/spec-1-greetings`, or the base ref.
+ */
+async function startRefFor(ticket: Ticket, context: PipelineContext): Promise<string> {
+  const spec = ticket.spec;
+  if (spec === null) {
+    return context.baseRef;
+  }
+  /** Prepares the spec branch while no other ticket of the spec changes it. */
+  const prepareWhileLocked = () => prepareSpecBranch(spec.branch, context.baseRef);
+  return context.specBranchLock.run(spec.branch, prepareWhileLocked);
+}
+
+/**
+ * Creates a spec branch on `origin` if it does not exist yet, and downloads its newest commits.
+ *
+ * @param specBranch The spec branch.
+ * @param baseRef The ref that a new spec branch starts from, such as `origin/main`.
+ * @returns The remote-tracking ref of the spec branch.
+ */
+async function prepareSpecBranch(specBranch: string, baseRef: string): Promise<string> {
+  await git.ensureRemoteBranch(specBranch, baseRef);
+  return git.fetchBranch(specBranch);
 }
 
 /**
  * Runs the implementer and the reviewer in one sandbox on the ticket branch.
  *
- * The loop is: run the checks, review if they pass, and send every problem
- * back to the implementer. It ends on an approval or when the repair rounds
- * are used up.
+ * The loop is: run the checks, review if they pass, deliver an approved
+ * change, and send every problem back to the implementer. A conflict with
+ * the newest spec branch is a problem too. The loop ends on a delivery or
+ * when the repair rounds are used up. The sandbox stays open until the
+ * delivery ends, because the tracker reads the evidence from the checkout.
  *
  * @param ticket The ticket to implement.
  * @param branch The branch that receives the commits.
  * @param spec The text of the spec, for context.
+ * @param baseRef The ref that the ticket branch starts from.
  * @param context What every ticket of this runner start shares.
- * @returns The approval with its proof, or the reason the work stopped.
+ * @returns The delivery, or the reason the work stopped.
  */
 async function workInSandbox(
   ticket: Ticket,
   branch: string,
   spec: string,
+  baseRef: string,
   context: PipelineContext,
 ): Promise<SandboxWork> {
-  const { config, baseRef } = context;
+  const { config } = context;
   const implementer = createAgent(config.agents.implementer);
   const reviewer = createAgent(config.agents.reviewer);
   const checkCommands = config.checks.map((check) => `- \`${check.command}\``).join("\n");
@@ -129,6 +184,7 @@ async function workInSandbox(
     TICKET_TITLE: ticket.title,
     TICKET_BODY: ticket.body,
     SPEC: spec,
+    EVIDENCE_FILE: `${EVIDENCE_FOLDER}/${EVIDENCE_FILE}`,
   };
 
   const sandbox = await sandcastle.createSandbox({
@@ -144,6 +200,7 @@ async function workInSandbox(
     if (context.codexLoginPath !== null) {
       copiedCodexLogin = await copyCodexLoginIn(sandbox, context.codexLoginPath);
     }
+    await prepareEvidenceFolder(sandbox);
 
     const implementation = await sandbox.run({
       agent: implementer,
@@ -156,7 +213,7 @@ async function workInSandbox(
 
     const stopReason = reasonImplementerStopped(implementation, config);
     if (stopReason !== null) {
-      return { approved: false, reason: stopReason };
+      return { delivered: false, reason: stopReason };
     }
 
     for (let round = 0; ; round++) {
@@ -166,7 +223,7 @@ async function workInSandbox(
       if (problem === "") {
         const commitCount = await git.countCommitsAhead(baseRef, branch);
         if (commitCount === 0) {
-          return { approved: false, reason: "The implementer finished but made no commits." };
+          return { delivered: false, reason: "The implementer finished but made no commits." };
         }
 
         const reviewRun = await sandbox.run({
@@ -177,17 +234,28 @@ async function workInSandbox(
         });
         const review = parseReview(reviewRun.stdout);
         if (review === null) {
-          return { approved: false, reason: "The reviewer did not return a valid verdict." };
+          return { delivered: false, reason: "The reviewer did not return a valid verdict." };
         }
         if (review.verdict === "approve") {
-          return { approved: true, review, checks };
+          const evidence = await collectEvidence(sandbox.worktreePath);
+          const attempt = await deliverApproved(
+            ticket,
+            branch,
+            { review, checks, evidence },
+            context,
+          );
+          if (attempt.status === "delivered") {
+            return { delivered: true, delivery: attempt.delivery };
+          }
+          problem = describeConflict(attempt.targetRef);
+        } else {
+          problem = describeRejection(review);
         }
-        problem = describeRejection(review);
       }
 
       if (round === config.limits.fixRounds) {
         return {
-          approved: false,
+          delivered: false,
           reason: `The work still has problems after ${round} repair rounds.\n\n${problem}`,
         };
       }
@@ -203,6 +271,60 @@ async function workInSandbox(
   } finally {
     await closeSandbox(sandbox, context.codexLoginPath, copiedCodexLogin);
   }
+}
+
+/**
+ * Gives approved work to the tracker.
+ *
+ * A ticket of a spec waits until no other ticket of the same spec is in
+ * delivery. Then the runner checks the ticket branch against the newest spec
+ * branch, and delivers it only if it merges with no conflict.
+ *
+ * @param ticket The approved ticket.
+ * @param branch The ticket branch.
+ * @param work The review, the check results, and the evidence.
+ * @param context What every ticket of this runner start shares.
+ * @returns The delivery, or the spec branch ref that the ticket branch conflicts with.
+ */
+async function deliverApproved(
+  ticket: Ticket,
+  branch: string,
+  work: ApprovedWork,
+  context: PipelineContext,
+): Promise<DeliveryAttempt> {
+  const { tracker } = context;
+  const spec = ticket.spec;
+  if (spec === null) {
+    const delivery = await tracker.deliver(ticket, branch, work);
+    return { status: "delivered", delivery };
+  }
+
+  /** Delivers the ticket if it merges into the newest spec branch with no conflict. */
+  const deliverIntoSpec = async (): Promise<DeliveryAttempt> => {
+    const targetRef = await git.fetchBranch(spec.branch);
+    const isClean = await git.mergesCleanly(targetRef, branch);
+    if (!isClean) {
+      return { status: "conflict", targetRef };
+    }
+    const delivery = await tracker.deliver(ticket, branch, work);
+    return { status: "delivered", delivery };
+  };
+
+  return context.specBranchLock.run(spec.branch, deliverIntoSpec);
+}
+
+/**
+ * Describes a conflict with the spec branch for the implementer.
+ *
+ * @param targetRef The newest spec branch, such as `origin/feat/spec-1-greetings`.
+ * @returns The task: merge the spec branch, resolve the conflicts, and commit.
+ */
+function describeConflict(targetRef: string): string {
+  return [
+    `Other tickets of the same spec changed the spec branch \`${targetRef}\`, and this branch now conflicts with it.`,
+    "",
+    `Run \`git merge ${targetRef}\`. Resolve every conflict so that the work of both sides stays and works together. Commit the merge. Update the evidence if the merge changed what it shows.`,
+  ].join("\n");
 }
 
 /**
@@ -252,7 +374,8 @@ function reasonImplementerStopped(
  *
  * The first result reports uncommitted files, because a pull request holds
  * only commits. The runner looks before it runs the project checks, so files
- * that the checks create do not count.
+ * that the checks create do not count. Git ignores the evidence folder, so
+ * evidence files do not count either.
  *
  * @param sandbox The sandbox of the ticket.
  * @param checks The check commands from the config.

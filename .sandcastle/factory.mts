@@ -4,7 +4,9 @@
  * It reads the ticket queue from the tracker (GitHub issues or Markdown
  * files), gives each ready ticket to sandboxed agents, and delivers each
  * ticket that passes the project checks and the review: a pull request on
- * GitHub, or a pushed branch for Markdown tickets.
+ * GitHub, or a pushed branch for Markdown tickets. A ticket of a spec goes
+ * into the spec branch at once. When every ticket of a spec is closed, the
+ * spec branch becomes one final pull request.
  *
  * Usage, from the project root:
  *
@@ -20,13 +22,17 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { loadConfig, requireMergeSupport, type FactoryConfig } from "./factory/config.mts";
 import * as git from "./factory/git.mts";
+import { KeyedLock } from "./factory/keyedLock.mts";
 import { runTicket, type PipelineContext, type TicketOutcome } from "./factory/pipeline.mts";
 import { checkLogins, createSandboxProvider } from "./factory/sandbox.mts";
 import type { QueueView, Ticket } from "./factory/tickets.mts";
-import { createTracker } from "./factory/tracker.mts";
+import { createTracker, type Delivery, type SpecDelivery } from "./factory/tracker.mts";
 
 /** How many lines of a blocked reason the terminal shows. The ticket comment holds the full reason. */
 const MAX_REASON_LINES = 3;
+
+/** How a ticket or a spec ended in this runner start. */
+type RunOutcome = TicketOutcome | SpecDelivery;
 
 /** The command line options of one runner start. */
 interface RunOptions {
@@ -118,28 +124,52 @@ function printQueue(queue: QueueView, queueLabel: string): void {
 }
 
 /**
- * Describes the outcome of one ticket in one line.
+ * Describes the outcome of one ticket or one spec in one line.
  *
- * @param outcome How the work on the ticket ended.
+ * @param outcome How the work on the ticket or the spec ended.
  * @returns A line for the terminal.
  */
-function describeOutcome(outcome: TicketOutcome): string {
-  const ticketName = `${outcome.ticket.reference} ${outcome.ticket.title}`;
+function describeOutcome(outcome: RunOutcome): string {
+  const name =
+    "ticket" in outcome
+      ? `${outcome.ticket.reference} ${outcome.ticket.title}`
+      : `spec ${outcome.spec.reference} ${outcome.spec.title}`;
   switch (outcome.status) {
-    case "pull-request": {
-      const note = outcome.note === "" ? "" : `\n      Not merged: ${outcome.note}`;
-      return `  pull request  ${ticketName}\n      ${outcome.url}${note}`;
-    }
-    case "merged":
-      return `  merged        ${ticketName}\n      ${outcome.url}`;
-    case "pushed":
-      return `  pushed        ${ticketName}\n      Open a pull request for the branch ${outcome.branch}.`;
     case "in-review":
-      return `  in review     ${ticketName}\n      An open pull request exists: ${outcome.url}`;
+      return `  in review     ${name}\n      An open pull request exists: ${outcome.url}`;
     case "blocked": {
       const reasonLines = outcome.reason.split("\n").filter((line) => line.trim() !== "");
       const shownLines = reasonLines.slice(0, MAX_REASON_LINES);
-      return `  blocked       ${ticketName}\n      ${shownLines.join("\n      ")}`;
+      return `  blocked       ${name}\n      ${shownLines.join("\n      ")}`;
+    }
+    default:
+      return describeDelivery(name, outcome);
+  }
+}
+
+/**
+ * Describes what the tracker did with a ticket or a spec.
+ *
+ * @param name The reference and the title of the ticket or the spec.
+ * @param delivery What the tracker did.
+ * @returns A line for the terminal.
+ */
+function describeDelivery(name: string, delivery: Delivery): string {
+  switch (delivery.status) {
+    case "pull-request": {
+      const note = delivery.note === "" ? "" : `\n      Not merged: ${delivery.note}`;
+      return `  pull request  ${name}\n      ${delivery.url}${note}`;
+    }
+    case "merged": {
+      const link = delivery.url === null ? "" : `\n      ${delivery.url}`;
+      return `  merged        ${name}\n      Into ${delivery.target}.${link}`;
+    }
+    case "pushed": {
+      const advice =
+        delivery.note === ""
+          ? `Open a pull request for the branch ${delivery.branch}.`
+          : delivery.note;
+      return `  pushed        ${name}\n      ${advice}`;
     }
   }
 }
@@ -195,10 +225,13 @@ function isTicketNamed(ticket: Ticket, name: string): boolean {
 }
 
 /**
- * Runs the factory: reads the queue, works on ready tickets in rounds, and prints the outcomes.
+ * Runs the factory: reads the queue, works on ready tickets in rounds,
+ * delivers finished specs after each round, and prints the outcomes.
  *
  * A new round starts only after a merge, because only a merged ticket can
- * unblock the tickets that wait for it.
+ * unblock the tickets that wait for it. A ticket of a spec merges into the
+ * spec branch in every merge mode, so the tickets of a spec that wait for it
+ * start in the next round.
  */
 async function main(): Promise<void> {
   const projectRoot = path.resolve(import.meta.dirname, "..");
@@ -225,41 +258,45 @@ async function main(): Promise<void> {
   }
 
   const attempted = new Set<string>();
-  const outcomes: TicketOutcome[] = [];
+  const outcomes: RunOutcome[] = [];
+  const specBranchLock = new KeyedLock();
   let sandboxProvider: PipelineContext["sandboxProvider"] | null = null;
   let codexLoginPath: string | null = null;
 
   for (;;) {
     const candidates = selectCandidates(queue, attempted, options);
-    if (candidates.length === 0) {
-      break;
+    let roundOutcomes: TicketOutcome[] = [];
+    if (candidates.length > 0) {
+      if (sandboxProvider === null) {
+        codexLoginPath = await requireLogins(config, projectRoot);
+        sandboxProvider = createSandboxProvider(config.sandbox);
+      }
+      const roundContext: PipelineContext = {
+        config,
+        baseRef: await git.fetchBranch(config.baseBranch),
+        projectRoot,
+        promptsDir: path.join(projectRoot, ".sandcastle", "prompts"),
+        sandboxProvider,
+        tracker,
+        codexLoginPath,
+        specBranchLock,
+      };
+
+      console.log(`\nStarting ${candidates.length} ticket(s). Logs are in .sandcastle/logs/.`);
+      roundOutcomes = await mapWithLimit(candidates, config.limits.maxParallel, (ticket) =>
+        runTicket(ticket, roundContext),
+      );
+      for (const outcome of roundOutcomes) {
+        attempted.add(outcome.ticket.id);
+      }
     }
 
-    if (sandboxProvider === null) {
-      codexLoginPath = await requireLogins(config, projectRoot);
-      sandboxProvider = createSandboxProvider(config.sandbox);
-    }
-    const roundContext: PipelineContext = {
-      config,
-      baseRef: await git.fetchBase(config.baseBranch),
-      projectRoot,
-      promptsDir: path.join(projectRoot, ".sandcastle", "prompts"),
-      sandboxProvider,
-      tracker,
-      codexLoginPath,
-    };
+    const specOutcomes = await tracker.deliverFinishedSpecs();
+    outcomes.push(...roundOutcomes, ...specOutcomes);
 
-    console.log(`\nStarting ${candidates.length} ticket(s). Logs are in .sandcastle/logs/.`);
-    const roundOutcomes = await mapWithLimit(candidates, config.limits.maxParallel, (ticket) =>
-      runTicket(ticket, roundContext),
-    );
-
-    for (const outcome of roundOutcomes) {
-      attempted.add(outcome.ticket.id);
-      outcomes.push(outcome);
-    }
-
-    const mergedSomething = roundOutcomes.some((outcome) => outcome.status === "merged");
+    // Only a merge can unblock a waiting ticket, so a new round starts only after a merge.
+    const roundResults: RunOutcome[] = [...roundOutcomes, ...specOutcomes];
+    const mergedSomething = roundResults.some((outcome) => outcome.status === "merged");
     if (!mergedSomething) {
       break;
     }
@@ -268,7 +305,7 @@ async function main(): Promise<void> {
 
   console.log("\nResult:");
   if (outcomes.length === 0) {
-    console.log("  No ticket was ready.");
+    console.log("  No ticket was ready, and no spec was finished.");
   }
   for (const outcome of outcomes) {
     console.log(describeOutcome(outcome));
