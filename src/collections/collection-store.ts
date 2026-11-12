@@ -1,6 +1,7 @@
 /** Collections keep complete editor snapshots locally, independently of sent-request history. */
 import type {CollectionRequestLink, EditorState} from '../history/request-state'
 import {readStorage, removeStorage, writeStorage} from '../shared/storage'
+import type {ImportedCollection, ImportedItem} from './postman-converter'
 
 /** One entry in the collection index, in creation order. */
 export interface CollectionSummary {
@@ -26,10 +27,27 @@ export type CollectionItem = CollectionRequest | CollectionFolder
 /** The existing requests field now holds ordered requests and folders, preserving saved flat collections. */
 export interface Collection extends CollectionSummary {
   requests: CollectionItem[]
+  postmanId?: string
+  variables?: unknown[]
 }
 
 export const COLLECTION_INDEX_KEY = 'browsercurl.collectionIndex'
 export const COLLECTION_KEY_PREFIX = 'browsercurl.collection.'
+
+/** Give every import fresh local IDs, even when its name or Postman ID is already saved. */
+export function saveImportedCollection(imported: ImportedCollection): Promise<string> {
+  const snapshot = structuredClone(imported)
+  return navigator.locks.request(COLLECTION_INDEX_KEY, async () => {
+    const identify = (item: ImportedItem): CollectionItem => 'editor' in item
+      ? {id: crypto.randomUUID(), editor: item.editor}
+      : {id: crypto.randomUUID(), name: item.name, requests: item.requests.map(identify)}
+    const collection: Collection = {...snapshot, id: crypto.randomUUID(), requests: snapshot.requests.map(identify)}
+    const index = await listCollections()
+    index.push({id: collection.id, name: collection.name})
+    await writeStorage({[COLLECTION_KEY_PREFIX + collection.id]: collection, [COLLECTION_INDEX_KEY]: index})
+    return collection.id
+  })
+}
 
 /** Read the small collection index without reading editor values or credentials. */
 export async function listCollections(): Promise<CollectionSummary[]> {

@@ -1,0 +1,39 @@
+{
+  "info": {
+    "name": "Imported Widget API",
+    "_postman_id": "fixture-widget-api",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Documentation that browsercurl cannot keep."
+  },
+  "variable": [{"key": "unused", "value": "{{unchanged}}", "type": "string"}],
+  "auth": {"type": "bearer", "bearer": [{"key": "token", "value": "collection-token", "type": "string"}]},
+  "item": [
+    {
+      "name": "Widgets",
+      "auth": {"type": "bearer", "bearer": [{"key": "token", "value": "folder-token", "type": "string"}]},
+      "item": [
+        {
+          "name": "Writes",
+          "item": [
+            {
+              "name": "Create widget",
+              "request": {
+                "method": "POST",
+                "url": {
+                  "raw": "TEST_ORIGIN/echo?kept=yes",
+                  "query": [{"key": "kept", "value": "yes"}, {"key": "disabled", "value": "{{not-sent}}", "disabled": true}]
+                },
+                "header": [{"key": "X-Widget", "value": "imported"}, {"key": "X-Disabled", "value": "{{not-sent}}", "disabled": true}],
+                "body": {"mode": "raw", "raw": "{\"widget\":\"{{name}}\"}", "options": {"raw": {"language": "json"}}}
+              },
+              "event": [{"listen": "test", "script": {"exec": ["pm.test('example', () => {});"]}}],
+              "response": [{"name": "Saved example", "code": 200, "body": "{}"}]
+            }
+          ]
+        },
+        {"name": "List widgets", "request": {"method": "GET", "url": "TEST_ORIGIN/echo?list=yes"}}
+      ]
+    },
+    {"name": "Health", "request": {"method": "GET", "url": "TEST_ORIGIN/echo?health=yes"}}
+  ]
+}

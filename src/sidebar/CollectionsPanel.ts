@@ -1,11 +1,12 @@
 /** In-panel collection browsing and Save as forms. Collection writes stay in the side panel. */
 import {
   addCollectionFolder, addCollectionRequest, COLLECTION_INDEX_KEY, COLLECTION_KEY_PREFIX, createCollection,
-  deleteCollectionItem, findCollectionRequest, listCollections, loadCollection, renameCollectionItem, updateCollectionRequest
+  deleteCollectionItem, findCollectionRequest, listCollections, loadCollection, renameCollectionItem, saveImportedCollection, updateCollectionRequest
 } from '../collections/collection-store'
 import type {Collection, CollectionFolder, CollectionItem} from '../collections/collection-store'
 import type {CollectionRequestLink, EditorState} from '../history/request-state'
 import {resolveRequestName} from '../history/request-state'
+import {importPostmanCollection} from '../collections/postman-converter'
 
 /** Find a required control in the sidebar's static markup. */
 function element<T extends HTMLElement>(selector: string): T {
@@ -83,6 +84,12 @@ export class CollectionsPanel {
     this.form.addEventListener('submit', this.save)
     this.list.addEventListener('click', this.openRequest)
     element('#new-collection').addEventListener('click', () => this.showCreate())
+    const fileInput = element<HTMLInputElement>('#collection-file')
+    element('#import-collection').addEventListener('click', () => fileInput.click())
+    fileInput.addEventListener('change', this.importCollection)
+    element('#dismiss-collection-import').addEventListener('click', () => {
+      element('#collection-import-notice').hidden = true
+    })
     element('#cancel-collection-item').addEventListener('click', () => { this.createForm.hidden = true })
     this.createForm.addEventListener('submit', this.createItem)
     element('#cancel-collection-delete').addEventListener('click', this.cancelDelete)
@@ -323,6 +330,44 @@ export class CollectionsPanel {
   private showError(message: string): void {
     this.error.textContent = message
     this.error.hidden = false
+  }
+
+  /** Convert the entire file before writing anything, then open the newly created tree. */
+  private importCollection = async (): Promise<void> => {
+    const input = element<HTMLInputElement>('#collection-file')
+    const file = input.files?.[0]
+    const button = element<HTMLButtonElement>('#import-collection')
+    if (!file || button.disabled) return
+    button.disabled = true
+    this.error.hidden = true
+    element('#collection-import-notice').hidden = true
+    try {
+      if (!/\.json$/i.test(file.name)) throw new Error('Choose one .json Postman Collection file.')
+      const imported = importPostmanCollection(await file.text())
+      let id: string
+      try { id = await saveImportedCollection(imported.collection) } catch {
+        throw new Error('Could not save the imported collection. Try importing the file again.')
+      }
+      if (this.disposed) return
+      this.collapsed.delete(id)
+      this.createForm.hidden = true
+      await this.render()
+      element('#collection-import-summary').textContent = `Imported “${imported.collection.name}”.`
+      const warnings = imported.warnings.map((message) => {
+        const row = document.createElement('li')
+        row.textContent = message
+        return row
+      })
+      element('#collection-import-warnings').replaceChildren(...warnings)
+      element('#collection-import-warning-title').hidden = warnings.length === 0
+      element('#collection-import-warnings').hidden = warnings.length === 0
+      element('#collection-import-notice').hidden = false
+    } catch (error) {
+      if (!this.disposed) this.showError(error instanceof Error ? error.message : 'Could not read this file. Try importing it again.')
+    } finally {
+      input.value = ''
+      button.disabled = false
+    }
   }
 
   /** Reload the selected request at click time instead of opening a stale cached snapshot. */

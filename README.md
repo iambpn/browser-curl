@@ -23,7 +23,7 @@ A REST API client in the browser sidebar for Chromium and Firefox. Send HTTP req
 - **Authorization:** Use Bearer tokens, Basic auth, API keys in headers or query parameters, or a custom Authorization header.
 - **cURL import:** Paste a command into the URL field to fill the editor. Review import warnings and select **Undo** to restore the earlier values.
 - **Background requests:** Keep requests running after the panel closes. Reopen the panel to view the result or cancel a running request.
-- **Collections:** Use **Save as** to keep named requests in a new or existing collection. Reopen them with every editor value, including disabled rows and authorization.
+- **Collections:** Save and reopen named requests in collections and nested folders. Import Postman Collection v2.0 or v2.1 JSON files, including supported authorization and disabled rows. Import warnings list dropped scripts, descriptions, saved examples, protocol settings, and unsupported body or auth types. Collection variables are kept without being substituted.
 - **Drafts and history:** Restore unfinished drafts and browse the latest 100 sent requests, including their responses or failures.
 - **Response viewer:** Inspect status, headers, size, and duration. Switch between raw text and formatted JSON, then copy the result.
 - **Panel controls:** Resize the response area and send requests with **Ctrl+Enter** or **Command+Enter**.
