@@ -51,6 +51,10 @@ export class CollectionsPanel {
   private deleteWarning = element('#collection-delete-warning')
   private pendingDelete: {collectionId: string; itemId: string; name: string} | undefined
   private collapsed = new Set<string>()
+  private renaming: {
+    collectionId: string; itemId: string; name: string; input: HTMLInputElement; button: HTMLButtonElement
+  } | undefined
+  private renderingTree = false
   private creatingIn: {collectionId: string; folderId?: string} | undefined
   private createForm = element<HTMLFormElement>('#collection-item-form')
   private createName = element<HTMLInputElement>('#collection-item-name')
@@ -111,7 +115,21 @@ export class CollectionsPanel {
       const collections = await Promise.all(index.map((summary) => loadCollection(summary.id)))
       if (refresh !== this.refresh || this.disposed) return
       const items = collections.filter((collection): collection is Collection => Boolean(collection))
-      this.list.replaceChildren(...items.map((collection) => this.collectionItem(collection)))
+      const edit = this.renaming
+      const focused = edit && document.activeElement === edit.input
+      const selection = edit && {start: edit.input.selectionStart, end: edit.input.selectionEnd, direction: edit.input.selectionDirection}
+      this.renderingTree = true
+      try {
+        this.list.replaceChildren(...items.map((collection) => this.collectionItem(collection)))
+      } finally {
+        this.renderingTree = false
+      }
+      // Reuse the live input, including its undo history, and restore focus lost while moving its row.
+      if (edit && !edit.input.isConnected) this.renaming = undefined
+      else if (focused && edit && selection) {
+        edit.input.focus({preventScroll: true})
+        edit.input.setSelectionRange(selection.start, selection.end, selection.direction ?? undefined)
+      }
       this.empty.hidden = items.length !== 0
       this.error.hidden = true
     } catch {
@@ -130,7 +148,7 @@ export class CollectionsPanel {
     const node = document.createElement('li')
     const row = document.createElement('div')
     row.className = 'collection-row'
-    row.style.paddingLeft = `${12 + depth * 18}px`
+    row.style.setProperty('--collection-depth', String(depth))
     const isRequest = 'editor' in item
     const name = isRequest ? item.editor.name : item.name
     const button = document.createElement('button')
@@ -167,6 +185,13 @@ export class CollectionsPanel {
     label.textContent = name
     button.append(label)
     row.append(button)
+    const edit = this.renaming
+    if (edit?.collectionId === collection.id && edit.itemId === item.id) {
+      edit.name = name
+      edit.button = button
+      button.hidden = true
+      row.prepend(edit.input)
+    }
     if (!isRequest) {
       row.append(this.action('Add folder', () => this.showCreate(collection.id, item.id === collection.id ? undefined : item.id)))
     }
@@ -202,19 +227,24 @@ export class CollectionsPanel {
     input.value = name
     button.hidden = true
     row.prepend(input)
+    const edit = {collectionId, itemId, name, input, button}
+    this.renaming = edit
     let cancelled = false
     input.addEventListener('keydown', (event) => {
       if (event.key !== 'Enter' && event.key !== 'Escape') return
       event.preventDefault()
       cancelled = event.key === 'Escape'
       input.blur()
-      button.focus()
+      edit.button.focus()
     })
     input.addEventListener('blur', async () => {
+      // Moving a focused input during refresh is not a user committing the rename.
+      if (this.renderingTree || this.renaming !== edit) return
+      this.renaming = undefined
       const value = input.value.trim()
       input.remove()
-      button.hidden = false
-      if (cancelled || value === name) return
+      edit.button.hidden = false
+      if (cancelled || value === edit.name) return
       if (!value) return this.showError('Enter a name.')
       try {
         await renameCollectionItem(collectionId, itemId, value)
@@ -222,7 +252,7 @@ export class CollectionsPanel {
       } catch {
         this.showError('Could not rename this item. Try again.')
       }
-    }, {once: true})
+    })
     input.focus()
     input.select()
   }

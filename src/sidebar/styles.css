@@ -426,6 +426,9 @@ main {
   display: flex;
   align-items: center;
   gap: 8px;
+  /* Keep room for names and actions at every depth; the containing list scrolls. */
+  min-width: calc(320px + var(--collection-depth) * 18px);
+  padding-left: calc(12px + var(--collection-depth) * 18px);
   padding-right: 12px;
   border-bottom: 1px solid var(--line);
 }
@@ -435,7 +438,7 @@ main {
   align-items: center;
   gap: 8px;
   flex: 1;
-  min-width: 0;
+  min-width: 100px;
   padding: 14px 0;
   background: transparent;
   text-align: left;
@@ -448,7 +451,7 @@ main {
 
 .collection-rename {
   flex: 1;
-  min-width: 0;
+  min-width: 100px;
   width: 0;
   margin: 6px 0;
 }

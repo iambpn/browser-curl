@@ -22,11 +22,11 @@ async function create(panel, name, parent) {
   await expect(row(panel, name)).toBeVisible()
 }
 
-async function saveIn(panel, name, destination) {
+async function saveIn(panel, name, destination, evidenceName) {
   await click(panel, '#save-as')
   await fill(panel, '#save-request-name', name)
   await panel.locator('#save-collection').selectOption({label: destination})
-  await proof(panel, destination.startsWith('\u00a0'.repeat(4)) ? 'nested-folder-save-picker' : 'folder-save-picker')
+  await proof(panel, evidenceName ?? (destination.startsWith('\u00a0'.repeat(4)) ? 'nested-folder-save-picker' : 'folder-save-picker'))
   await click(panel, '#confirm-save-as')
   await expectHidden(panel, '#save-as-dialog')
 }
@@ -248,4 +248,82 @@ test('keeps another panel and its folder picker current after creating, renaming
   await row(first, 'Renamed folder').getByRole('button', {name: 'Delete', exact: true}).click()
   await expect(row(second, 'Renamed folder')).toHaveCount(0)
   await proof(second, 'folder-changes-update-another-panel')
+})
+
+test('keeps names and controls usable through fourteen folder levels in a narrow panel', async ({extension, api}) => {
+  let panel = await extension.openPanel()
+  await panel.setViewportSize({width: 380, height: 820})
+  await click(panel, '#show-collections')
+  await create(panel, 'Deep API')
+  let parent = 'Deep API'
+  for (let depth = 1; depth <= 14; depth++) {
+    const name = `Level ${depth}`
+    await create(panel, name, parent)
+    parent = name
+  }
+  await click(panel, '#close-collections')
+  await fill(panel, '#request-url', `${api.origin}/echo`)
+  await saveIn(panel, 'Deep request', '\u00a0\u00a0'.repeat(14) + parent, 'deep-folder-save-picker')
+  await extension.restart()
+  panel = await extension.openPanel()
+  await panel.setViewportSize({width: 380, height: 820})
+  await click(panel, '#show-collections')
+  await expect(panel.locator('[data-item-name]')).toHaveCount(16)
+  const widths = await panel.locator('.collection-row').evaluateAll(rows => rows.map(row => ({
+    name: row.querySelector('[data-item-name]').getBoundingClientRect().width,
+    button: row.querySelector('.collection-request').getBoundingClientRect().width,
+    marker: row.querySelector('.collection-request > span').getBoundingClientRect().width
+  })))
+  expect(widths.every(({name, button, marker}) => name >= 80 && button >= 100 && marker >= 6), JSON.stringify(widths)).toBe(true)
+  const list = panel.locator('#collections-list')
+  expect(await list.evaluate(node => node.scrollWidth > node.clientWidth)).toBe(true)
+  await row(panel, 'Level 14').getByRole('button', {name: 'Collapse Level 14', exact: true}).click()
+  await expect(row(panel, 'Deep request')).toBeHidden()
+  await row(panel, 'Level 14').getByRole('button', {name: 'Expand Level 14', exact: true}).click()
+  await rename(panel, 'Level 14', 'Deepest folder')
+  await expect(row(panel, 'Deepest folder')).toBeVisible()
+  expect(await row(panel, 'Deepest folder').locator('[data-folder-name]').evaluate(node => node.getBoundingClientRect().width)).toBeGreaterThanOrEqual(80)
+  await proof(panel, 'deep-tree-scrolls-with-usable-controls')
+  await row(panel, 'Deep request').locator('[data-open-collection-request]').click()
+  await expectHidden(panel, '#collections-dialog')
+  await expectValue(panel, '#request-url', `${api.origin}/echo`)
+})
+
+test('preserves inline rename text, selection and focus while another panel refreshes the tree', async ({extension, api}) => {
+  const first = await extension.openPanel()
+  await click(first, '#show-collections')
+  await create(first, 'API')
+  await create(first, 'Folder', 'API')
+  await click(first, '#close-collections')
+  await fill(first, '#request-url', `${api.origin}/echo`)
+  await saveIn(first, 'Request', '\u00a0\u00a0Folder')
+  await click(first, '#show-collections')
+  const second = await extension.openPanel()
+  await click(second, '#show-collections')
+  for (const [index, name] of ['API', 'Folder', 'Request'].entries()) {
+    await row(first, name).getByRole('button', {name: 'Rename', exact: true}).click()
+    const input = first.getByRole('textbox', {name: 'Name', exact: true})
+    await input.fill(`Edited ${name}`)
+    await input.evaluate(node => node.setSelectionRange(1, 4, 'backward'))
+    await create(second, `Unrelated ${index}`)
+    // Seeing the new row ensures the storage-driven refresh has completed before asserting edit state.
+    await expect(row(first, `Unrelated ${index}`)).toBeVisible()
+    await expect(input).toHaveValue(`Edited ${name}`)
+    await expect(input).toBeFocused()
+    expect(await input.evaluate(node => [node.selectionStart, node.selectionEnd, node.selectionDirection])).toEqual([1, 4, 'backward'])
+    await proof(first, `inline-${name.toLowerCase()}-rename-survives-refresh`)
+    await input.press('End')
+    await first.keyboard.type(' kept')
+    // A second refresh also preserves edits made since the first refresh.
+    await create(second, `Another ${index}`)
+    await expect(row(first, `Another ${index}`)).toBeVisible()
+    await expect(input).toHaveValue(`Edited ${name} kept`)
+    await expect(input).toBeFocused()
+    await input.press('Enter')
+    await expect(row(first, `Edited ${name} kept`)).toBeVisible()
+    await expect(row(second, `Edited ${name} kept`)).toBeVisible()
+  }
+  const saved = (await first.evaluate(storedCollections)).collections.find(collection => collection.name === 'Edited API kept')
+  expect(saved.requests[0].name).toBe('Edited Folder kept')
+  expect(saved.requests[0].requests[0].editor.name).toBe('Edited Request kept')
 })
