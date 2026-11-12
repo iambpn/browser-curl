@@ -15,10 +15,17 @@ export interface EditorState {
   authValues: Record<string, string>
 }
 
-/** An editor snapshot and the saved request whose result the panel displays. */
+/** The collection request that Save updates. */
+export interface CollectionRequestLink {
+  collectionId: string
+  requestId: string
+}
+
+/** An editor snapshot, its collection destination, and the saved send whose result the panel displays. */
 export interface PanelSnapshot {
   editor: EditorState
   responseId?: string
+  collectionRequest?: CollectionRequestLink
 }
 
 /** The current draft and an optional history preview that keeps the draft available. */

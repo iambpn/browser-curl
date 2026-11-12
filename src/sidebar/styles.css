@@ -405,6 +405,145 @@ main {
   background: var(--canvas);
 }
 
+.collections-toolbar,
+.collection-item-form {
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.collections-toolbar {
+  display: flex;
+  gap: 8px;
+}
+
+#collection-import-notice {
+  margin: 12px 18px;
+  flex-shrink: 0;
+}
+
+.collection-item-form .auth-input {
+  width: 100%;
+  margin-bottom: 12px;
+}
+
+.collection-children {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.collection-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* Keep room for names and actions at every depth; the containing list scrolls. */
+  min-width: calc(320px + var(--collection-depth) * 18px);
+  padding-left: calc(12px + var(--collection-depth) * 18px);
+  padding-right: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.collection-request {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 100px;
+  padding: 14px 0;
+  background: transparent;
+  text-align: left;
+  font-size: 12px;
+}
+
+.collection-row:hover {
+  background: var(--canvas);
+}
+
+.collection-rename {
+  flex: 1;
+  min-width: 100px;
+  width: 0;
+  margin: 6px 0;
+}
+
+.collection-action {
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.save-as-form {
+  padding: 18px;
+  overflow-y: auto;
+}
+
+.save-as-form .auth-input {
+  width: 100%;
+  margin-bottom: 16px;
+}
+
+.save-as-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 18px;
+}
+
+.collection-save-status {
+  margin-bottom: 12px;
+  color: var(--text);
+  font-size: 11px;
+}
+
+.collection-unsaved-warning {
+  padding: 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  background: var(--canvas);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+#request-collection {
+  max-width: 130px;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 400px) {
+  .request-heading {
+    flex-wrap: wrap;
+    padding-top: 6px;
+    padding-bottom: 6px;
+    gap: 4px;
+  }
+
+  .request-heading .workspace-actions {
+    margin-left: auto;
+  }
+
+  .app-header {
+    height: auto;
+    min-height: 64px;
+    padding: 12px 14px;
+    flex-wrap: wrap;
+  }
+
+  .header-actions {
+    margin-left: auto;
+  }
+
+  .request-actions {
+    flex-wrap: wrap;
+  }
+
+  .request-actions .url-help {
+    flex-basis: 100%;
+  }
+}
+
 .request-section {
   padding: 25px 20px 0;
   background: var(--surface);
