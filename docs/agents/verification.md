@@ -6,6 +6,14 @@ browser-curl is a browser extension. Its sidebar sends HTTP requests and imports
 
 Call the tools in `node_modules/.bin` directly, as the checks below do. The `pnpm` command on this machine does not work in the sandbox. If you must change dependencies, run `npx --yes pnpm@12.4.1 install` and commit `pnpm-lock.yaml`.
 
+Before the first e2e run in a fresh sandbox, install Playwright's Chromium as the same user that runs the checks:
+
+```sh
+node_modules/.bin/playwright install chromium --no-shell
+```
+
+Playwright keeps browser executables in a user cache outside `node_modules`. Copying installed dependencies into a worktree does not copy that cache. Repeat this setup after updating Playwright or changing the sandbox user. An `Executable doesn't exist` launch error means the browser is missing; the tests have not reached the extension. The e2e fixture uses full Chromium (`channel: 'chromium'`), so it needs that browser even when Google Chrome is installed for the simulated browser test.
+
 ## Checks
 
 Run these commands in this order. Each must exit with code 0.
