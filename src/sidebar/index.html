@@ -205,7 +205,11 @@
         <div><h2 id="collections-title">Collections</h2><p id="collections-description">Named requests, saved on this device.</p></div>
         <button id="close-collections" class="remove-button" type="button" aria-label="Close collections" title="Close collections" autofocus>×</button>
       </div>
-      <div class="collections-toolbar"><button id="new-collection" class="history-button" type="button">New collection</button></div>
+      <div class="collections-toolbar">
+        <button id="new-collection" class="history-button" type="button">New collection</button>
+        <button id="import-collection" class="history-button" type="button">Import</button>
+        <input id="collection-file" type="file" accept=".json" aria-label="Postman Collection file" hidden />
+      </div>
       <form id="collection-item-form" class="collection-item-form" hidden>
         <label id="collection-item-label" class="field-label" for="collection-item-name">Collection name</label>
         <input id="collection-item-name" class="auth-input" autocomplete="off" required />
@@ -215,6 +219,16 @@
         </div>
       </form>
       <p id="collections-error" class="request-error" role="alert" hidden></p>
+      <div id="collection-import-notice" class="import-notice" role="status" hidden>
+        <div class="import-message">
+          <p id="collection-import-summary"></p>
+          <p id="collection-import-warning-title" class="import-warning-title">These parts of the collection were dropped:</p>
+          <ul id="collection-import-warnings" class="import-warnings" aria-labelledby="collection-import-warning-title"></ul>
+        </div>
+        <div class="import-actions">
+          <button id="dismiss-collection-import" class="remove-button" type="button" aria-label="Dismiss collection import message" title="Dismiss">×</button>
+        </div>
+      </div>
       <div id="collection-unsaved-warning" class="collection-unsaved-warning" role="alert" hidden>
         <p>You have unsaved changes. Discard them and load the selected request?</p>
         <div class="save-as-actions">
@@ -229,7 +243,7 @@
           <button id="confirm-collection-delete" class="history-button" type="button">Confirm delete</button>
         </div>
       </div>
-      <p id="collections-empty" class="history-empty">No collections yet. Use New collection to create one, or Save as to save a request in a collection.</p>
+      <p id="collections-empty" class="history-empty">No collections yet. Use New collection or Import above, or Save as to save a request in a collection.</p>
       <ul id="collections-list" class="history-list" aria-label="Collections"></ul>
     </dialog>
     <dialog id="save-as-dialog" class="history-dialog" aria-labelledby="save-as-title">

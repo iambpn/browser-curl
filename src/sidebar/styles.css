@@ -411,6 +411,16 @@ main {
   border-bottom: 1px solid var(--line);
 }
 
+.collections-toolbar {
+  display: flex;
+  gap: 8px;
+}
+
+#collection-import-notice {
+  margin: 12px 18px;
+  flex-shrink: 0;
+}
+
 .collection-item-form .auth-input {
   width: 100%;
   margin-bottom: 12px;
