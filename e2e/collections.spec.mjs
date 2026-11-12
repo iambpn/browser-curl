@@ -214,6 +214,56 @@ for (const destination of ['existing', 'new']) {
   })
 }
 
+/** Let another panel update the picker while a save waits for the collection write lock. */
+test('blocks duplicate submission when another panel refreshes the picker during a pending save', async ({extension, api}) => {
+  const first = await extension.openPanel()
+  await fill(first, '#request-url', `${api.origin}/echo`)
+  await saveAs(first, 'Seed request', 'Shared collection')
+  const second = await extension.openPanel()
+  await click(first, '#save-as')
+  await fill(first, '#save-request-name', 'Pending request')
+  await expect(first.locator('#confirm-save-as')).toBeEnabled()
+  await click(second, '#save-as')
+  await fill(second, '#save-request-name', 'Other request')
+  await second.locator('#save-collection').selectOption('new')
+  await fill(second, '#new-collection-name', 'Other collection')
+  await expect(second.locator('#confirm-save-as')).toBeEnabled()
+
+  // Pause before the real write and before its acknowledgement, keeping the write lock held.
+  await second.evaluate(() => {
+    const set = chrome.storage.local.set.bind(chrome.storage.local)
+    chrome.storage.local.set = (items, callback) => {
+      if (!Object.hasOwn(items, 'browsercurl.collectionIndex')) return set(items, callback)
+      window.commitCollectionWrite = () => set(items, () => {
+        window.finishCollectionWrite = callback
+      })
+    }
+  })
+  await click(second, '#confirm-save-as')
+  await second.waitForFunction(() => typeof window.commitCollectionWrite === 'function')
+  await click(first, '#confirm-save-as')
+  await expect(first.locator('#confirm-save-as')).toBeDisabled()
+  await second.evaluate(() => window.commitCollectionWrite())
+  await second.waitForFunction(() => typeof window.finishCollectionWrite === 'function')
+  await expect(first.locator('#save-collection option')).toHaveText(['Shared collection', 'Other collection', 'New collection'])
+  await expect.soft(first.locator('#confirm-save-as')).toBeDisabled()
+  // Exercise both button clicks and form submission while the original save is still pending.
+  await first.evaluate(() => {
+    document.querySelector('#confirm-save-as').click()
+    document.querySelector('#save-as-form').requestSubmit()
+  })
+  await second.evaluate(() => window.finishCollectionWrite())
+  for (const panel of [first, second]) {
+    await expectHidden(panel, '#save-as-dialog')
+    await expectText(panel, '#collection-save-status', 'Request saved to collection.')
+  }
+  // Wait behind all queued writes before checking that the attempted resubmit stored no duplicate.
+  await first.evaluate(() => navigator.locks.request('browsercurl.collectionIndex', () => {}))
+  const saved = await first.evaluate(storedCollections)
+  expect(saved.collections.flatMap(({requests}) => requests).map(({editor}) => editor.name).sort())
+    .toEqual(['Other request', 'Pending request', 'Seed request'])
+})
+
 /** Cancel without writing, and reject whitespace-only names without losing entered editor values. */
 async function saveFormValidation({extension, api}) {
   const panel = await extension.openPanel()

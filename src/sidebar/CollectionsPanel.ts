@@ -29,6 +29,8 @@ export class CollectionsPanel {
   private status = element('#collection-save-status')
   private refresh = 0
   private pickerRefresh = 0
+  private pickerReady = false
+  private saving = false
   private statusTimer: ReturnType<typeof setTimeout> | undefined
   private disposed = false
 
@@ -134,12 +136,14 @@ export class CollectionsPanel {
   private async refreshPicker(): Promise<void> {
     const refresh = ++this.pickerRefresh
     const selected = this.picker.value
+    this.pickerReady = false
     this.confirm.disabled = true
     try {
       const index = await listCollections()
       if (refresh !== this.pickerRefresh || this.disposed) return
       this.renderPicker(index, selected)
-      this.confirm.disabled = false
+      this.pickerReady = true
+      this.confirm.disabled = this.saving
     } catch {
       if (refresh !== this.pickerRefresh || this.disposed) return
       this.saveError.textContent = 'Could not read collections. Close this form and try again.'
@@ -166,7 +170,7 @@ export class CollectionsPanel {
   /** Report success only after storage accepts both the collection and its index. */
   private save = async (event: SubmitEvent): Promise<void> => {
     event.preventDefault()
-    if (this.confirm.disabled) return
+    if (this.saving || !this.pickerReady) return
     const name = this.name.value.trim()
     const collectionName = this.newName.value.trim()
     const isNew = this.picker.value === 'new'
@@ -175,6 +179,7 @@ export class CollectionsPanel {
       this.saveError.hidden = false
       return
     }
+    this.saving = true
     this.confirm.disabled = true
     this.saveError.hidden = true
     try {
@@ -190,7 +195,8 @@ export class CollectionsPanel {
       this.saveError.textContent = 'Could not save this request to the collection. Your request was not saved. Try again.'
       this.saveError.hidden = false
     } finally {
-      this.confirm.disabled = false
+      this.saving = false
+      this.confirm.disabled = !this.pickerReady
     }
   }
 
