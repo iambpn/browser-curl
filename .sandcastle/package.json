@@ -1,0 +1,16 @@
+{
+  "name": "software-factory-runner",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "factory": "tsx factory.mts"
+  },
+  "dependencies": {
+    "@ai-hero/sandcastle": "^0.14.0",
+    "tsx": "^4.19.0",
+    "zod": "^4.0.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  }
+}

@@ -1,0 +1,9 @@
+# Agent logins. Never commit this file.
+.env
+# Output of each agent run.
+logs/
+# Agent checkouts. Sandcastle creates and removes them.
+worktrees/
+patches/
+# Packages of the factory runner.
+node_modules/
