@@ -11,8 +11,9 @@ import {
   HISTORY_INDEX_KEY, HISTORY_KEY_PREFIX, listHistorySummaries, loadSavedRequest, loadWorkspace, saveWorkspace
 } from '../history/request-store'
 import {CollectionsPanel} from './CollectionsPanel'
+import {COLLECTION_KEY_PREFIX, loadCollection} from '../collections/collection-store'
 import {resolveRequestName} from '../history/request-state'
-import type {EditorState, HistorySummary, PanelSnapshot, SavedRequest} from '../history/request-state'
+import type {CollectionRequestLink, EditorState, HistorySummary, PanelSnapshot, SavedRequest} from '../history/request-state'
 
 /** Milliseconds to wait after the last keystroke before the panel saves the draft. */
 const DRAFT_SAVE_DELAY_MS = 300
@@ -164,6 +165,8 @@ class SidebarApp {
   private sentRequestIds = new Set<string>()
   private draftSaveTimer: ReturnType<typeof setTimeout> | undefined
   private draftBeforeHistory: PanelSnapshot | undefined
+  private collectionRequest: CollectionRequestLink | undefined
+  private collectionHeadingRevision = 0
   private responseId: string | undefined
   private responseRevision = 0
   private runningId: string | undefined
@@ -243,7 +246,10 @@ class SidebarApp {
     this.updateMethod()
     this.updateAuthorization()
     this.fitResponse()
-    new CollectionsPanel(() => this.readEditorState(), this.openCollectionRequest)
+    new CollectionsPanel(
+      () => this.readEditorState(), this.openCollectionRequest,
+      () => this.collectionRequest, this.linkCollectionRequest
+    )
     void this.restoreWorkspace()
   }
 
@@ -257,6 +263,8 @@ class SidebarApp {
         this.draftBeforeHistory = workspace.preview ? workspace.draft : undefined
         const snapshot = workspace.preview ?? workspace.draft
         this.applyEditorState(snapshot.editor)
+        this.collectionRequest = snapshot.collectionRequest
+        void this.updateCollectionHeading()
         this.responseId = snapshot.responseId
         await this.restoreResponse()
       }
@@ -275,7 +283,7 @@ class SidebarApp {
 
   /** Read the current editor and the response reference without copying response bodies into the draft. */
   private readPanelSnapshot(): PanelSnapshot {
-    return {editor: this.readEditorState(), responseId: this.responseId}
+    return {editor: this.readEditorState(), responseId: this.responseId, collectionRequest: this.collectionRequest}
   }
 
   /** Save the editor now and cancel a pending delayed save. Background request completion stores responses separately. */
@@ -493,6 +501,8 @@ class SidebarApp {
       const saved = await loadSavedRequest(open.dataset.openHistory!)
       if (!saved) return
       if (!this.draftBeforeHistory) this.draftBeforeHistory = this.readPanelSnapshot()
+      this.collectionRequest = undefined
+      void this.updateCollectionHeading()
       this.hideImportNotice()
       this.resetResponse()
       this.applyEditorState(saved.editor)
@@ -507,15 +517,44 @@ class SidebarApp {
   }
 
   /** Load all saved editor values and start with a fresh response through the usual send path. */
-  private openCollectionRequest = (editor: EditorState): void => {
+  private openCollectionRequest = (editor: EditorState, link: CollectionRequestLink): void => {
     this.draftBeforeHistory = undefined
     this.responseId = undefined
     this.responseRevision += 1
     this.hideImportNotice()
     this.resetResponse()
     this.applyEditorState(editor)
+    this.collectionRequest = link
+    void this.updateCollectionHeading()
     this.updateWorkspaceLabel()
     this.persistWorkspace()
+  }
+
+  /** Save as changes the destination and request name while preserving the current response and editor values. */
+  private linkCollectionRequest = (link: CollectionRequestLink, name: string): void => {
+    this.collectionRequest = link
+    this.requestName = name
+    this.updateRequestName()
+    void this.updateCollectionHeading()
+    this.persistWorkspace()
+  }
+
+  /** Resolve the collection name from storage so restored and renamed collections show their current names. */
+  private async updateCollectionHeading(): Promise<void> {
+    const revision = ++this.collectionHeadingRevision
+    const heading = element('#request-collection')
+    heading.hidden = true
+    const link = this.collectionRequest
+    if (!link) return
+    try {
+      const collection = await loadCollection(link.collectionId)
+      if (revision !== this.collectionHeadingRevision || this.disposed) return
+      heading.textContent = collection?.name ?? ''
+      heading.title = collection?.name ?? ''
+      heading.hidden = !collection
+    } catch {
+      // Keep the editor usable when the collection name cannot be read; Save reports storage failures.
+    }
   }
 
   /** Return from a history preview to the untouched draft and its saved response. */
@@ -525,6 +564,8 @@ class SidebarApp {
     this.draftBeforeHistory = undefined
     this.hideImportNotice()
     this.applyEditorState(draft.editor)
+    this.collectionRequest = draft.collectionRequest
+    void this.updateCollectionHeading()
     this.responseId = draft.responseId
     try {
       await this.restoreResponse()
@@ -539,6 +580,8 @@ class SidebarApp {
   private clearRequest = (): void => {
     this.canPersistWorkspace = true
     this.draftBeforeHistory = undefined
+    this.collectionRequest = undefined
+    void this.updateCollectionHeading()
     this.responseId = undefined
     this.hideImportNotice()
     this.resetResponse()
@@ -560,6 +603,9 @@ class SidebarApp {
   /** Update open history and the displayed response when the background stores a result or deletion. */
   private handleStorageChange = (changes: Record<string, chrome.storage.StorageChange>, area: string): void => {
     if (area !== 'local' || this.disposed) return
+    if (this.collectionRequest && changes[COLLECTION_KEY_PREFIX + this.collectionRequest.collectionId]) {
+      void this.updateCollectionHeading()
+    }
     const indexChange = changes[HISTORY_INDEX_KEY]
     if (indexChange && this.historyDialog.open) {
       const summaries = (indexChange.newValue ?? []) as HistorySummary[]

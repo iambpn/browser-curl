@@ -451,7 +451,36 @@ main {
   font-size: 11px;
 }
 
+.collection-unsaved-warning {
+  padding: 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  background: var(--canvas);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+#request-collection {
+  max-width: 130px;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (max-width: 400px) {
+  .request-heading {
+    flex-wrap: wrap;
+    padding-top: 6px;
+    padding-bottom: 6px;
+    gap: 4px;
+  }
+
+  .request-heading .workspace-actions {
+    margin-left: auto;
+  }
+
   .app-header {
     height: auto;
     min-height: 64px;

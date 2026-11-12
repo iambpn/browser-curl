@@ -1,5 +1,5 @@
 /** Collections keep complete editor snapshots locally, independently of sent-request history. */
-import type {EditorState} from '../history/request-state'
+import type {CollectionRequestLink, EditorState} from '../history/request-state'
 import {readStorage, writeStorage} from '../shared/storage'
 
 /** One entry in the collection index, in creation order. */
@@ -41,9 +41,9 @@ export async function loadCollection(id: string): Promise<Collection | undefined
  */
 export function addCollectionRequest(
   destination: {id: string} | {name: string}, editor: EditorState
-): Promise<void> {
+): Promise<CollectionRequestLink> {
   const snapshot = structuredClone(editor)
-  async function save(): Promise<void> {
+  async function save(): Promise<CollectionRequestLink> {
     if (!snapshot.name.trim()) throw new Error('Enter a request name.')
     const request: CollectionRequest = {id: crypto.randomUUID(), editor: snapshot}
     if ('id' in destination) {
@@ -51,7 +51,7 @@ export function addCollectionRequest(
       if (!collection) throw new Error('This collection is no longer available. Choose another collection.')
       collection.requests.push(request)
       await writeStorage({[COLLECTION_KEY_PREFIX + collection.id]: collection})
-      return
+      return {collectionId: collection.id, requestId: request.id}
     }
     const name = destination.name.trim()
     if (!name) throw new Error('Enter a collection name.')
@@ -59,9 +59,24 @@ export function addCollectionRequest(
     const index = await listCollections()
     index.push({id: collection.id, name})
     await writeStorage({[COLLECTION_KEY_PREFIX + collection.id]: collection, [COLLECTION_INDEX_KEY]: index})
+    return {collectionId: collection.id, requestId: request.id}
   }
   // Web Locks serialize mutations across every panel on the extension origin. Use one lock
   // for collections and their shared index, covering all reads through the completed write.
   // The browser releases the lock on success, failure, or when the panel closes.
   return navigator.locks.request(COLLECTION_INDEX_KEY, save)
+}
+
+/** Replace every editor value under the same write lock as additions. Missing requests are never recreated. */
+export function updateCollectionRequest(link: CollectionRequestLink, editor: EditorState): Promise<boolean> {
+  const snapshot = structuredClone(editor)
+  return navigator.locks.request(COLLECTION_INDEX_KEY, async () => {
+    const collection = await loadCollection(link.collectionId)
+    const request = collection?.requests.find((request) => request.id === link.requestId)
+    if (!collection || !request) return false
+    if (!snapshot.name.trim()) throw new Error('Enter a request name.')
+    request.editor = snapshot
+    await writeStorage({[COLLECTION_KEY_PREFIX + collection.id]: collection})
+    return true
+  })
 }

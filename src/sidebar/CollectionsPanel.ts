@@ -1,9 +1,9 @@
 /** In-panel collection browsing and Save as forms. Collection writes stay in the side panel. */
 import {
-  addCollectionRequest, COLLECTION_INDEX_KEY, COLLECTION_KEY_PREFIX, listCollections, loadCollection
+  addCollectionRequest, COLLECTION_INDEX_KEY, COLLECTION_KEY_PREFIX, listCollections, loadCollection, updateCollectionRequest
 } from '../collections/collection-store'
 import type {Collection, CollectionSummary} from '../collections/collection-store'
-import type {EditorState} from '../history/request-state'
+import type {CollectionRequestLink, EditorState} from '../history/request-state'
 import {resolveRequestName} from '../history/request-state'
 
 /** Find a required control in the sidebar's static markup. */
@@ -11,6 +11,25 @@ function element<T extends HTMLElement>(selector: string): T {
   const node = document.querySelector<T>(selector)
   if (!node) throw new Error(`Missing collections element: ${selector}`)
   return node
+}
+
+/** Compare complete editor values, treating an absent row group like the editor's default blank row. */
+function editorValues(editor: EditorState): string {
+  const rows = (entries: EditorState['params']) => (entries.length ? entries : [{enabled: true, key: '', value: ''}])
+    .map(({enabled, key, value}) => [enabled, key, value])
+  return JSON.stringify([
+    editor.name, editor.method, editor.url, rows(editor.params), rows(editor.headers),
+    editor.body, editor.bodyType, editor.authType,
+    Object.entries(editor.authValues).sort(([a], [b]) => a.localeCompare(b))
+  ])
+}
+
+/** An untouched editor (on startup or after Clear) has only default controls and blank inputs. */
+function isEmptyEditor(editor: EditorState): boolean {
+  return !editor.name && !editor.url && !editor.body && editor.method === 'GET' && editor.bodyType === 'json'
+    && ['none', 'bearer'].includes(editor.authType)
+    && [...editor.params, ...editor.headers].every((row) => row.enabled && !row.key && !row.value)
+    && Object.entries(editor.authValues).every(([key, value]) => value === (key === 'api-key-location' ? 'header' : ''))
 }
 
 /** Coordinate collection dialogs with the editor through its existing snapshot interface. */
@@ -27,6 +46,9 @@ export class CollectionsPanel {
   private saveError = element('#save-as-error')
   private confirm = element<HTMLButtonElement>('#confirm-save-as')
   private status = element('#collection-save-status')
+  private warning = element('#collection-unsaved-warning')
+  private pendingLoad: CollectionRequestLink | undefined
+  private openRevision = 0
   private refresh = 0
   private pickerRefresh = 0
   private pickerReady = false
@@ -34,20 +56,32 @@ export class CollectionsPanel {
   private statusTimer: ReturnType<typeof setTimeout> | undefined
   private disposed = false
 
-  constructor(private readEditor: () => EditorState, private openEditor: (editor: EditorState) => void) {
+  constructor(
+    private readEditor: () => EditorState,
+    private openEditor: (editor: EditorState, link: CollectionRequestLink) => void,
+    private readLink: () => CollectionRequestLink | undefined,
+    private linkEditor: (link: CollectionRequestLink, name: string) => void
+  ) {
     element('#show-collections').addEventListener('click', this.show)
     element('#close-collections').addEventListener('click', () => this.dialog.close())
     element('#save-as').addEventListener('click', this.showSaveAs)
+    element('#save-request').addEventListener('click', this.saveLinked)
     element('#cancel-save-as').addEventListener('click', () => this.saveDialog.close())
     this.picker.addEventListener('change', this.updateNewCollection)
     this.form.addEventListener('submit', this.save)
     this.list.addEventListener('click', this.openRequest)
+    element('#cancel-collection-load').addEventListener('click', this.cancelLoad)
+    element('#discard-collection-changes').addEventListener('click', () => {
+      if (this.pendingLoad) void this.loadRequest(this.pendingLoad, true)
+    })
+    this.dialog.addEventListener('close', this.cancelLoad)
     chrome.storage.onChanged.addListener(this.storageChanged)
     window.addEventListener('pagehide', this.dispose, {once: true})
   }
 
   /** Open a fresh view of all saved collections. Native dialog Escape returns to the editor. */
   private show = (): void => {
+    this.cancelLoad()
     this.dialog.showModal()
     void this.render()
   }
@@ -108,16 +142,47 @@ export class CollectionsPanel {
   private openRequest = async (event: MouseEvent): Promise<void> => {
     const button = (event.target as Element).closest<HTMLButtonElement>('[data-open-collection-request]')
     if (!button) return
+    await this.loadRequest({collectionId: button.dataset.collectionId!, requestId: button.dataset.openCollectionRequest!})
+  }
+
+  /** Protect current edits with an in-panel choice, then re-read the destination when Discard is selected. */
+  private async loadRequest(link: CollectionRequestLink, discard = false): Promise<void> {
+    const revision = ++this.openRevision
     try {
-      const collection = await loadCollection(button.dataset.collectionId!)
-      const request = collection?.requests.find((request) => request.id === button.dataset.openCollectionRequest)
+      const collection = await loadCollection(link.collectionId)
+      const request = collection?.requests.find((request) => request.id === link.requestId)
       if (!request) throw new Error('Request is no longer available.')
-      this.openEditor(request.editor)
+      const dirty = !discard && await this.hasUnsavedChanges()
+      if (revision !== this.openRevision || !this.dialog.open || this.disposed) return
+      if (dirty) {
+        this.pendingLoad = link
+        this.warning.hidden = false
+        element('#cancel-collection-load').focus()
+        return
+      }
+      this.openEditor(request.editor, link)
       this.dialog.close()
     } catch {
+      if (revision !== this.openRevision || !this.dialog.open || this.disposed) return
       this.error.textContent = 'Could not open this saved request. Close this panel and try again.'
       this.error.hidden = false
     }
+  }
+
+  /** Compare against storage at load time, including changes made by another open panel. */
+  private async hasUnsavedChanges(): Promise<boolean> {
+    const link = this.readLink()
+    if (!link) return !isEmptyEditor(this.readEditor())
+    const collection = await loadCollection(link.collectionId)
+    const request = collection?.requests.find((request) => request.id === link.requestId)
+    return !request || editorValues(request.editor) !== editorValues(this.readEditor())
+  }
+
+  /** Cancel and closing the panel never replace the editor or retain a pending discard action. */
+  private cancelLoad = (): void => {
+    this.openRevision += 1
+    this.pendingLoad = undefined
+    this.warning.hidden = true
   }
 
   /** Suggest the current editor name and offer existing collections alongside New collection. */
@@ -185,12 +250,10 @@ export class CollectionsPanel {
     try {
       const editor = {...this.readEditor(), name}
       const destination = isNew ? {name: collectionName} : {id: this.picker.value}
-      await addCollectionRequest(destination, editor)
+      const link = await addCollectionRequest(destination, editor)
+      this.linkEditor(link, name)
       this.saveDialog.close()
-      this.status.textContent = 'Request saved to collection.'
-      this.status.hidden = false
-      clearTimeout(this.statusTimer)
-      this.statusTimer = setTimeout(() => { this.status.hidden = true }, 4000)
+      this.showSavedStatus()
     } catch {
       this.saveError.textContent = 'Could not save this request to the collection. Your request was not saved. Try again.'
       this.saveError.hidden = false
@@ -198,6 +261,34 @@ export class CollectionsPanel {
       this.saving = false
       this.confirm.disabled = !this.pickerReady
     }
+  }
+
+  /** Save back to the linked request, or let the user choose a destination when the link is absent or deleted. */
+  private saveLinked = async (): Promise<void> => {
+    if (this.saving) return
+    const link = this.readLink()
+    if (!link) return this.showSaveAs()
+    this.saving = true
+    clearTimeout(this.statusTimer)
+    this.status.hidden = true
+    try {
+      const saved = await updateCollectionRequest(link, this.readEditor())
+      if (saved) this.showSavedStatus()
+      else this.showSaveAs()
+    } catch {
+      this.status.textContent = 'Could not save this request to the collection. Your request was not saved. Try again.'
+      this.status.hidden = false
+    } finally {
+      this.saving = false
+    }
+  }
+
+  /** Confirm successful storage writes briefly beside the Save actions. */
+  private showSavedStatus(): void {
+    this.status.textContent = 'Request saved to collection.'
+    this.status.hidden = false
+    clearTimeout(this.statusTimer)
+    this.statusTimer = setTimeout(() => { this.status.hidden = true }, 4000)
   }
 
   /** Refresh open collection views for changes from this panel or another side panel. */
