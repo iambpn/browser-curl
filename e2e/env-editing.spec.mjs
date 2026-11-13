@@ -591,3 +591,150 @@ test('inline base rename and fork-only additions reject invalid names and suppor
   await expect(panel.locator('#env-delete-warning')).toBeVisible()
   await proof(panel, 'env-delete-dark-narrow')
 })
+
+// Exercise every save completion with a newer draft, including the submitted field.
+for (const operation of ['add base', 'rename base', 'remove base', 'new fork', 'new fork with base draft', 'rename fork', 'add variable', 'delete variable', 'delete empty fork', 'show delete confirmation', 'confirm delete fork', 'value']) {
+  for (const selection of ['caret', 'selection']) {
+    test(`save completion: ${operation} preserves newer drafts, focus and ${selection}`, async ({extension, api}) => {
+      const panel = await extension.openPanel()
+      await setup(panel, api, 'API')
+      await addBase(panel, 'old')
+      const onBase = ['add base', 'rename base', 'remove base', 'new fork', 'new fork with base draft'].includes(operation)
+      if (!onBase) await newFork(panel, 'local')
+      if (operation === 'delete variable') {
+        await fill(panel, '#env-variable-name', 'extra')
+        await click(panel, '#env-add-variable')
+        await expect(panel.locator('#env-add-variable')).toBeEnabled()
+      }
+      if (['show delete confirmation', 'confirm delete fork'].includes(operation)) {
+        await panel.getByRole('textbox', {name: 'Value for old', exact: true}).fill('kept')
+        await expect(panel.locator('#env-delete-fork')).toBeEnabled()
+      }
+      if (operation === 'confirm delete fork') {
+        await click(panel, '#env-delete-fork')
+        await expect(panel.locator('#env-delete-warning')).toBeVisible()
+      }
+      if (operation === 'rename base') await panel.getByRole('button', {name: 'Rename old', exact: true}).click()
+      if (operation === 'rename fork') await click(panel, '#env-rename-fork')
+      const field = operation === 'rename base' ? '#env-rename-base-name'
+        : operation === 'rename fork' ? '#env-rename-fork-name'
+        : ['add base', 'remove base', 'new fork with base draft'].includes(operation) ? '#env-base-name'
+        : ['add variable', 'delete variable', 'value'].includes(operation) ? '#env-variable-name'
+        : '#env-fork-name'
+      const submittedField = operation.startsWith('new fork') ? '#env-fork-name' : field
+      if (!['remove base', 'delete variable', 'delete empty fork', 'show delete confirmation', 'confirm delete fork', 'value'].includes(operation)) {
+        await fill(panel, submittedField, 'first')
+      }
+      await panel.evaluate(() => {
+        const set = chrome.storage.local.set.bind(chrome.storage.local)
+        chrome.storage.local.set = (items, callback) => {
+          if (!Object.keys(items).some((key) => key.startsWith('browsercurl.collection.'))) return set(items, callback)
+          chrome.storage.local.set = set
+          set(items, () => { window.finishDraftSave = callback })
+        }
+      })
+      if (operation === 'remove base') await panel.getByRole('button', {name: 'Remove old', exact: true}).click()
+      else if (operation === 'delete variable') await panel.getByRole('button', {name: 'Delete extra', exact: true}).click()
+      else if (['delete empty fork', 'show delete confirmation'].includes(operation)) await click(panel, '#env-delete-fork')
+      else if (operation === 'confirm delete fork') await click(panel, '#env-confirm-delete')
+      else if (operation === 'value') await panel.getByRole('textbox', {name: 'Value for old', exact: true}).fill('saved')
+      else await panel.locator(submittedField).press('Enter')
+      await panel.waitForFunction(() => typeof window.finishDraftSave === 'function')
+
+      // The unfocused draft must also survive any rebuild.
+      const otherField = field === '#env-fork-name' ? null : '#env-fork-name'
+      if (otherField) await fill(panel, otherField, 'unfocused-draft')
+      await fill(panel, field, 'prefix')
+      if (selection === 'selection') {
+        await panel.keyboard.press('ArrowLeft')
+        await panel.keyboard.press('ArrowLeft')
+        await panel.keyboard.press('Shift+ArrowLeft')
+        await panel.keyboard.press('Shift+ArrowLeft')
+      }
+      const caret = await panel.locator(field).evaluate((input) => [input.selectionStart, input.selectionEnd, input.selectionDirection])
+      await panel.evaluate(() => window.finishDraftSave())
+      await expect(panel.locator('#env-new-fork')).toBeEnabled()
+      await expect(panel.locator(field)).toBeVisible()
+      const restoredCaret = await panel.locator(field).evaluate((input) => [input.selectionStart, input.selectionEnd, input.selectionDirection])
+      // Use only the keyboard after completion: locator typing would hide lost focus.
+      await panel.keyboard.type('suffix')
+      const expected = selection === 'caret' ? 'prefixsuffix' : 'prsuffixix'
+      await expect(panel.locator(field)).toHaveValue(expected)
+      await expect(panel.locator(field)).toBeFocused()
+      if (otherField) await expect(panel.locator(otherField)).toHaveValue('unfocused-draft')
+      await proof(panel, `env-save-${operation.replaceAll(' ', '-')}-${selection}`)
+
+      // Retained rename drafts must apply to the newly saved name on resubmission.
+      if (operation === 'rename base' || operation === 'rename fork') {
+        await panel.keyboard.press('Enter')
+        if (operation === 'rename base') await expect(panel.getByRole('button', {name: `Rename ${expected}`, exact: true})).toBeVisible()
+        else await expect(panel.getByRole('tab', {name: expected, exact: true})).toHaveAttribute('aria-selected', 'true')
+      }
+      expect(restoredCaret).toEqual(caret)
+    })
+  }
+}
+
+for (const operation of ['add base', 'rename base', 'new fork', 'rename fork', 'add variable']) {
+  test(`save completion: ${operation} preserves a newer selection without a text edit`, async ({extension, api}) => {
+    const panel = await extension.openPanel()
+    await setup(panel, api, 'API')
+    await addBase(panel, 'old')
+    if (['rename fork', 'add variable'].includes(operation)) await newFork(panel, 'local')
+    if (operation === 'rename base') await panel.getByRole('button', {name: 'Rename old', exact: true}).click()
+    if (operation === 'rename fork') await click(panel, '#env-rename-fork')
+    const field = {'add base': '#env-base-name', 'rename base': '#env-rename-base-name', 'new fork': '#env-fork-name', 'rename fork': '#env-rename-fork-name', 'add variable': '#env-variable-name'}[operation]
+    await fill(panel, field, 'first')
+    await panel.evaluate(() => {
+      const set = chrome.storage.local.set.bind(chrome.storage.local)
+      chrome.storage.local.set = (items, callback) => {
+        if (!Object.keys(items).some((key) => key.startsWith('browsercurl.collection.'))) return set(items, callback)
+        chrome.storage.local.set = set
+        set(items, () => { window.finishSelectionSave = callback })
+      }
+    })
+    await panel.keyboard.press('Enter')
+    await panel.waitForFunction(() => typeof window.finishSelectionSave === 'function')
+    await panel.keyboard.press('ArrowLeft')
+    for (let i = 0; i < 3; i++) await panel.keyboard.press('Shift+ArrowLeft')
+    await panel.evaluate(() => window.finishSelectionSave())
+    await expect(panel.locator('#env-new-fork')).toBeEnabled()
+    await panel.keyboard.type('suffix')
+    await expect(panel.locator(field)).toHaveValue('fsuffixt')
+    await expect(panel.locator(field)).toBeFocused()
+    await proof(panel, `env-save-${operation.replaceAll(' ', '-')}-selection-only`)
+  })
+}
+
+test('fork rename preserves an unfocused name draft and its selection while typing continues in a value', async ({extension, api}) => {
+  const panel = await extension.openPanel()
+  await setup(panel, api, 'API')
+  await addBase(panel, 'token')
+  await newFork(panel, 'local')
+  await click(panel, '#env-rename-fork')
+  await fill(panel, '#env-rename-fork-name', 'staging')
+  await panel.evaluate(() => {
+    const set = chrome.storage.local.set.bind(chrome.storage.local)
+    chrome.storage.local.set = (items, callback) => {
+      if (!Object.keys(items).some((key) => key.startsWith('browsercurl.collection.'))) return set(items, callback)
+      chrome.storage.local.set = set
+      set(items, () => { window.finishUnfocusedDraftSave = callback })
+    }
+  })
+  await panel.keyboard.press('Enter')
+  await panel.waitForFunction(() => typeof window.finishUnfocusedDraftSave === 'function')
+  await fill(panel, '#env-variable-name', 'next-variable')
+  await panel.keyboard.press('Shift+ArrowLeft')
+  const selection = await panel.locator('#env-variable-name').evaluate((input) => [input.selectionStart, input.selectionEnd, input.selectionDirection])
+  const token = panel.getByRole('textbox', {name: 'Value for token', exact: true})
+  await token.fill('prefix')
+  await panel.evaluate(() => window.finishUnfocusedDraftSave())
+  await expect(panel.getByRole('tab', {name: 'staging', exact: true})).toHaveAttribute('aria-selected', 'true')
+  await expect(panel.locator('#env-new-fork')).toBeEnabled()
+  await panel.keyboard.type('suffix')
+  await expect(token).toHaveValue('prefixsuffix')
+  await expect(token).toBeFocused()
+  await expect(panel.locator('#env-variable-name')).toHaveValue('next-variable')
+  expect(await panel.locator('#env-variable-name').evaluate((input) => [input.selectionStart, input.selectionEnd, input.selectionDirection])).toEqual(selection)
+  await proof(panel, 'env-save-unfocused-name-draft')
+})

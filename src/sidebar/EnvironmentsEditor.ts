@@ -16,15 +16,22 @@ export class EnvironmentsEditor {
   private collection: Collection | undefined
   private levelId: string | undefined
   private tab: string | null = null
+  private renderedTab: string | null = null
   private revision = 0
   private pending = 0
   private completions: Array<{revision: number, run: () => void}> = []
   private unsavedValues = new Map<string, {value: string}>()
+  private inputEdits = new WeakMap<HTMLInputElement, number>()
   private renamingBase: string | null = null
   private renamingFork = false
   private confirmingDelete = false
 
   constructor() {
+    this.section.addEventListener('input', (event) => {
+      if (event.target instanceof HTMLInputElement) {
+        this.inputEdits.set(event.target, (this.inputEdits.get(event.target) ?? 0) + 1)
+      }
+    })
     element('#env-close').addEventListener('click', this.close)
     element('#collections-dialog').addEventListener('close', this.close)
     element('#env-fork-form').addEventListener('submit', (event) => {
@@ -32,12 +39,17 @@ export class EnvironmentsEditor {
       if (this.pending) return
       const input = element<HTMLInputElement>('#env-fork-name')
       const name = input.value
+      const unchanged = this.unchangedInput(input)
+      const contentUnchanged = Array.from(element('#env-content').querySelectorAll('input'), (input) => this.unchangedInput(input))
       const id = crypto.randomUUID()
       void this.edit((env) => { createFork(env, id, name) }, () => {
-        input.value = ''
-        this.tab = id
-        this.resetActions()
-        this.render()
+        if (unchanged()) input.value = ''
+        // Opening the new tab must not hide a field the user moved into while saving.
+        if (contentUnchanged.every((unchanged) => unchanged()) && !element('#env-content').contains(document.activeElement)) {
+          this.tab = id
+          this.resetActions()
+        }
+        this.renderKeepingInput()
       })
     })
   }
@@ -82,7 +94,7 @@ export class EnvironmentsEditor {
     element('#collections-empty').hidden = Boolean(element('#collections-list').children.length)
   }
 
-  private async edit(change: (env: LevelEnv) => void, done: () => void = () => this.render()): Promise<void> {
+  private async edit(change: (env: LevelEnv) => void, done: () => void = () => this.renderKeepingInput()): Promise<void> {
     const collection = this.collection
     if (!collection) return
     const revision = this.revision
@@ -131,8 +143,16 @@ export class EnvironmentsEditor {
     this.confirmingDelete = false
   }
 
+  /** A submitted name can be consumed only if no newer edit or selection replaced it. */
+  private unchangedInput(input: HTMLInputElement): () => boolean {
+    const edits = this.inputEdits.get(input)
+    const {value, selectionStart, selectionEnd, selectionDirection} = input
+    return () => this.inputEdits.get(input) === edits && input.value === value &&
+      input.selectionStart === selectionStart && input.selectionEnd === selectionEnd && input.selectionDirection === selectionDirection
+  }
+
   /** Keep edits and validation in the panel, including keyboard submission and cancellation. */
-  private nameForm(id: string, buttonId: string, labelText: string, action: string, submit: (name: string) => void, value = '', cancel?: () => void): HTMLFormElement {
+  private nameForm(id: string, buttonId: string, labelText: string, action: string, submit: (name: string, unchanged: () => boolean) => void, value = '', cancel?: () => void): HTMLFormElement {
     const form = document.createElement('form')
     form.className = 'env-form'
     const label = document.createElement('label')
@@ -165,14 +185,13 @@ export class EnvironmentsEditor {
     form.append(label, row)
     form.addEventListener('submit', (event) => {
       event.preventDefault()
-      if (!this.pending) submit(input.value)
+      if (!this.pending) submit(input.value, this.unchangedInput(input))
     })
     return form
   }
 
   private removeFork(forkId: string, confirmed = false): void {
     if (this.pending) return
-    this.renamingFork = false
     let deleted = false
     void this.edit((env) => {
       // Failed saves leave drafts that need the same protection as stored values.
@@ -184,28 +203,37 @@ export class EnvironmentsEditor {
     }, () => {
       this.confirmingDelete = !deleted
       if (deleted) this.tab = null
-      this.render()
-      element(deleted ? '#env-tab-base' : '#env-cancel-delete').focus()
+      this.renderKeepingInput(deleted ? '#env-tab-base' : '#env-cancel-delete')
     })
   }
 
-  /** A save may finish after the user has moved into another field. */
+  /** Save completions preserve every surviving draft, plus the live focus and selection. */
   private renderKeepingInput(fallback?: string): void {
     const active = document.activeElement
-    const input = active instanceof HTMLInputElement && this.section.contains(active) ? active : null
-    const selection = input ? [input.selectionStart, input.selectionEnd, input.selectionDirection ?? undefined] as const : null
+    const tab = this.renderedTab
+    const inputs = Array.from(this.section.querySelectorAll('input'), (input) => ({
+      input, value: input.value,
+      selection: [input.selectionStart, input.selectionEnd, input.selectionDirection ?? undefined] as const
+    }))
     this.render()
-    // Row indices change when a preceding variable is deleted; follow its identity.
-    const restored = input && Array.from(this.section.querySelectorAll<HTMLInputElement>('input')).find((candidate) =>
-      input.dataset.variableKey ? candidate.dataset.variableKey === input.dataset.variableKey : candidate.id === input.id)
-    if (restored && input) {
-      // Name drafts live only in the input; restore text before its selection.
-      restored.value = input.value
-      restored.focus()
-      if (selection) restored.setSelectionRange(...selection)
-    } else if (fallback) {
-      element(fallback).focus()
+    let restoredFocus = false
+    for (const {input, value, selection} of inputs) {
+      // Content fields belong to a tab; global new-fork names survive tab changes.
+      if (tab !== this.tab && input.id !== 'env-fork-name') continue
+      // Row indices change after deletion; identify values by fork and variable name.
+      const restored = Array.from(this.section.querySelectorAll<HTMLInputElement>('input')).find((candidate) =>
+        input.dataset.variableKey ? candidate.dataset.variableKey === input.dataset.variableKey : candidate.id === input.id)
+      if (!restored) continue
+      if (restored.value !== value) restored.value = value
+      this.inputEdits.set(restored, this.inputEdits.get(input) ?? 0)
+      restored.setSelectionRange(...selection)
+      if (input === active) {
+        restored.focus()
+        restored.setSelectionRange(...selection)
+        restoredFocus = true
+      }
     }
+    if (!restoredFocus && fallback) element(fallback).focus()
   }
 
   private render(): void {
@@ -232,16 +260,16 @@ export class EnvironmentsEditor {
       return button
     }))
     const content = element('#env-content')
+    this.renderedTab = this.tab
     content.setAttribute('aria-labelledby', this.tab === null ? 'env-tab-base' : `env-tab-${this.tab}`)
     content.replaceChildren()
     if (this.tab === null) {
       for (const name of env.baseNames) {
         if (this.renamingBase === name) {
-          content.append(this.nameForm('env-rename-base-name', 'env-save-base-name', `Rename ${name}`, 'Save name', (newName) => {
+          content.append(this.nameForm('env-rename-base-name', 'env-save-base-name', `Rename ${name}`, 'Save name', (newName, unchanged) => {
             void this.edit((env) => renameBaseName(env, name, newName), () => {
-              this.renamingBase = null
-              this.render()
-              element('#env-tab-base').focus()
+              this.renamingBase = unchanged() ? null : newName.trim()
+              this.renderKeepingInput('#env-tab-base')
             })
           }, name, () => { this.renamingBase = null; this.render(); element('#env-tab-base').focus() }))
           continue
@@ -261,10 +289,10 @@ export class EnvironmentsEditor {
         row.append(label, rename, remove)
         content.append(row)
       }
-      content.append(this.nameForm('env-base-name', 'env-add-name', 'Variable name', 'Add name', (name) => {
+      content.append(this.nameForm('env-base-name', 'env-add-name', 'Variable name', 'Add name', (name, unchanged) => {
         void this.edit((env) => addBaseName(env, name), () => {
-          this.render()
-          element('#env-base-name').focus()
+          if (unchanged()) element<HTMLInputElement>('#env-base-name').value = ''
+          this.renderKeepingInput('#env-base-name')
         })
       }))
     } else {
@@ -284,9 +312,9 @@ export class EnvironmentsEditor {
       actions.append(rename, remove)
       content.append(actions)
       if (this.renamingFork) {
-        const form = this.nameForm('env-rename-fork-name', 'env-save-fork-name', 'Fork name', 'Save name', (name) => {
+        const form = this.nameForm('env-rename-fork-name', 'env-save-fork-name', 'Fork name', 'Save name', (name, unchanged) => {
           void this.edit((env) => renameFork(env, fork.id, name), () => {
-            this.renamingFork = false
+            this.renamingFork = !unchanged()
             this.renderKeepingInput('#env-rename-fork')
           })
         }, fork.name, () => { this.renamingFork = false; this.render(); element('#env-rename-fork').focus() })
@@ -353,9 +381,9 @@ export class EnvironmentsEditor {
         row.append(heading, input)
         content.append(row)
       }
-      content.append(this.nameForm('env-variable-name', 'env-add-variable', 'Fork-only variable name', 'Add variable', (name) => {
+      content.append(this.nameForm('env-variable-name', 'env-add-variable', 'Fork-only variable name', 'Add variable', (name, unchanged) => {
         void this.edit((env) => addForkVariable(env, fork.id, name), () => {
-          element<HTMLInputElement>('#env-variable-name').value = ''
+          if (unchanged()) element<HTMLInputElement>('#env-variable-name').value = ''
           this.renderKeepingInput('#env-variable-name')
         })
       }))
