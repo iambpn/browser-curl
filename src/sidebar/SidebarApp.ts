@@ -1,7 +1,7 @@
 /** The sidebar's request editor and response viewer. */
 import {controlSavedRequest, sendThroughBackground} from '../requests/background-client'
 import type {CurlImport} from '../requests/curl-import'
-import {buildRequest, parseRequestUrl} from '../requests/request'
+import {buildRequest} from '../requests/request'
 import {formatResponse, formatSize} from '../responses/format-response'
 import type {RequestAuthorization, RequestDraft, RequestEntry} from '../requests/request-types'
 import {loadResponseHeight, saveResponseHeight} from '../responses/response-height'
@@ -36,6 +36,31 @@ const AUTH_FIELD_IDS = [
 /** Return true when pasted or entered text is a cURL command and not a URL. */
 function isCurlCommand(text: string): boolean {
   return CURL_COMMAND_PATTERN.test(text)
+}
+
+/** Split editor text without validating or normalizing an unresolved URL. Skip delimiters inside references. */
+function editorUrlParts(text: string): {address: string; search: string; hash: string} {
+  let query = -1
+  let fragment = text.length
+  for (const match of text.matchAll(/\{\{[^{}]*\}\}|[?#]/g)) {
+    if (match[0] === '#') {
+      fragment = match.index
+      break
+    }
+    if (match[0] === '?' && query < 0) query = match.index
+  }
+  return {
+    address: text.slice(0, query < 0 ? fragment : query),
+    search: query < 0 ? '' : text.slice(query, fragment),
+    hash: text.slice(fragment)
+  }
+}
+
+/** Encode literal query text while leaving variable references available to the resolver and editor. */
+function encodeEditorParameter(value: string): string {
+  return value.split(/(\{\{[^{}]*\}\})/g).map((part, index) =>
+    index % 2 ? part : new URLSearchParams([['', part]]).toString().slice(1)
+  ).join('')
 }
 
 /** Read the Authorization tab fields that store the given authorization. */
@@ -703,20 +728,18 @@ class SidebarApp {
 
   /** Read URL parameters while retaining disabled rows and unfinished entries. */
   private readUrlParameters = (): void => {
-    let url: URL
-    try {
-      url = parseRequestUrl(this.url.value)
-    } catch {
-      return
-    }
-    if (url.search === this.lastUrlSearch) return
-    this.lastUrlSearch = url.search
+    if (isCurlCommand(this.url.value)) return
+    const {search} = editorUrlParts(this.url.value)
+    if (search === this.lastUrlSearch) return
+    this.lastUrlSearch = search
     const retained: RequestEntry[] = []
     for (const entry of this.readRows('params')) {
       if (!entry.enabled || !entry.key.trim()) retained.push(entry)
     }
     element('#params-rows').replaceChildren()
-    for (const [key, value] of url.searchParams) {
+    // A reference's name can itself contain query delimiters; decode it as one key or value.
+    const params = new URLSearchParams(search.replace(/\{\{[^{}]*\}\}/g, encodeURIComponent))
+    for (const [key, value] of params) {
       this.addRow('params', {enabled: true, key, value})
     }
     for (const entry of retained) this.addRow('params', entry)
@@ -831,11 +854,7 @@ class SidebarApp {
     if (!hasMethod) this.method.add(new Option(state.method))
     this.method.value = state.method
     this.url.value = state.url
-    try {
-      this.lastUrlSearch = parseRequestUrl(state.url).search
-    } catch {
-      this.lastUrlSearch = ''
-    }
+    this.lastUrlSearch = editorUrlParts(state.url).search
     this.replaceRows('params', state.params)
     this.replaceRows('headers', state.headers)
     this.body.value = state.body
@@ -863,19 +882,14 @@ class SidebarApp {
 
   /** Reflect enabled parameter rows in the URL without losing other URL parts. */
   private updateUrl(): void {
-    try {
-      const url = parseRequestUrl(this.url.value)
-      url.search = ''
-      for (const entry of this.readRows('params')) {
-        if (entry.enabled && entry.key.trim()) {
-          url.searchParams.append(entry.key, entry.value)
-        }
-      }
-      this.lastUrlSearch = url.search
-      this.url.value = url.href
-    } catch {
-      // Parameter rows remain editable before a valid URL is entered.
-    }
+    if (isCurlCommand(this.url.value)) return
+    const {address, hash} = editorUrlParts(this.url.value)
+    const query = this.readRows('params')
+      .filter((entry) => entry.enabled && entry.key.trim())
+      .map((entry) => `${encodeEditorParameter(entry.key)}=${encodeEditorParameter(entry.value)}`)
+      .join('&')
+    this.lastUrlSearch = query ? `?${query}` : ''
+    this.url.value = address + this.lastUrlSearch + hash
   }
 
   /** Count enabled nonempty rows beside each request tab. */

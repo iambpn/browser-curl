@@ -31,6 +31,60 @@ async function forkValue(panel, name, value) {
   }).toBe(true)
 }
 
+async function setupUrlEnv(panel, api, url) {
+  await fill(panel, '#request-url', url)
+  await click(panel, '#save-as')
+  await fill(panel, '#save-request-name', 'URL template')
+  await fill(panel, '#new-collection-name', 'URL API')
+  await click(panel, '#confirm-save-as')
+  await expect(panel.locator('#save-as-dialog')).toBeHidden()
+  await openEnvs(panel)
+  await addName(panel, 'baseUrl')
+  await addName(panel, 'id')
+  await fill(panel, '#env-fork-name', 'local')
+  await click(panel, '#env-new-fork')
+  await expect(panel.getByRole('tab', {name: 'local', exact: true})).toHaveAttribute('aria-selected', 'true')
+  await forkValue(panel, 'baseUrl', api.origin)
+  await forkValue(panel, 'id', '42')
+  await click(panel, '#env-close')
+  await click(panel, '#close-collections')
+  await panel.locator('#env-picker').selectOption('local')
+}
+
+test('query parameters typed in a base URL template resolve and survive reopening', async ({extension, api}) => {
+  const panel = await extension.openPanel()
+  await setupUrlEnv(panel, api, '{{baseUrl}}/echo')
+  const url = '{{baseUrl}}/echo?item={{id}}&item=second&literal=a%26b#details'
+  await fill(panel, '#request-url', url)
+  await send(panel)
+  expect((await echoedRequest(panel)).url).toBe('/echo?item=42&item=second&literal=a%26b')
+  await expect(panel.locator('#params-rows [data-field="value"]').first()).toHaveValue('{{id}}')
+  await expect(panel.locator('#request-url')).toHaveValue(url)
+  await click(panel, '#save-request')
+  await savedWorkspaceWith(panel, 'url', url)
+  await panel.reload()
+  await expect(panel.locator('#root')).not.toHaveAttribute('inert', '')
+  await send(panel)
+  expect((await echoedRequest(panel)).url).toBe('/echo?item=42&item=second&literal=a%26b')
+  await expect(panel.locator('#request-url')).toHaveValue(url)
+  await addEntry(panel, 'params', '{{ id }}', 'a&b {{id}}')
+  await expect(panel.locator('#request-url')).toHaveValue(`${url.replace('#details', '')}&{{ id }}=a%26b+{{id}}#details`)
+  await send(panel)
+  expect((await echoedRequest(panel)).url).toBe('/echo?item=42&item=second&literal=a%26b&42=a%26b+42')
+  await capture(panel, 'env-template-url-query')
+})
+
+test('editing Params preserves URL path references and resolves them when sending', async ({extension, api}) => {
+  const panel = await extension.openPanel()
+  const path = `${api.origin}/echo/{{id}}`
+  await setupUrlEnv(panel, api, `${path}#details`)
+  await addEntry(panel, 'params', 'foo', 'bar')
+  await send(panel)
+  expect((await echoedRequest(panel)).url).toBe('/echo/42?foo=bar')
+  await expect(panel.locator('#request-url')).toHaveValue(`${path}?foo=bar#details`)
+  await capture(panel, 'env-path-template-params')
+})
+
 test('collection envs resolve current values, block missing variables, persist and resend history safely', async ({extension, api}) => {
   let panel = await extension.openPanel()
   await fill(panel, '#request-url', '{{baseUrl}}/echo')
@@ -87,14 +141,14 @@ test('collection envs resolve current values, block missing variables, persist a
     expect(received.headers['x-token']).toBe(`${name}-token`)
     expect(received.headers['x-skip']).toBeUndefined()
     expect(received.body).toBe(`{"token":"${name}-token"}`)
-    await expect(panel.locator('#request-url')).toHaveValue('{{baseUrl}}/echo')
+    await expect(panel.locator('#request-url')).toHaveValue('{{baseUrl}}/echo?{{token}}={{token}}')
     await capture(panel, `env-${name}-sent`)
   }
   const history = await panel.evaluate(storedHistory)
   const {collections: [collection]} = await panel.evaluate(storedCollections)
   expect(history).toHaveLength(2)
   for (const saved of history) {
-    expect(saved.editor.url).toBe('{{baseUrl}}/echo')
+    expect(saved.editor.url).toBe('{{baseUrl}}/echo?{{token}}={{token}}')
     expect(saved.request.url).toMatch(new RegExp(`${api.origin}/(local|staging)/echo`))
     expect(saved.collectionRequest).toEqual({collectionId: collection.id, requestId: collection.requests[0].id})
   }
@@ -153,7 +207,7 @@ test('collection envs resolve current values, block missing variables, persist a
   await click(panel, '#show-history')
   // First two sends have no fresh header. Their templates must resolve using today's chosen env.
   await panel.locator('[data-open-history]').last().click()
-  await expect(panel.locator('#request-url')).toHaveValue('{{baseUrl}}/echo')
+  await expect(panel.locator('#request-url')).toHaveValue('{{baseUrl}}/echo?{{token}}={{token}}')
   await expect(panel.locator('#env-picker')).toBeHidden()
   await click(panel, '#body-tab')
   await fill(panel, '#request-body', '{"history":"{{token}}"}')
