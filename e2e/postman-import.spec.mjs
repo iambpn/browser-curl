@@ -38,7 +38,10 @@ async function importAndSend({extension, api}) {
   await capture(panel, 'postman-import-tree-and-warnings')
   const saved = await panel.evaluate(storedCollections)
   expect(saved.collections[0].postmanId).toBe('fixture-widget-api')
-  expect(saved.collections[0].variables).toEqual([{key: 'unused', value: '{{unchanged}}', type: 'string'}])
+  expect(saved.collections[0].variables).toBeUndefined()
+  expect(saved.collections[0].env.baseNames).toEqual(['unused'])
+  expect(saved.collections[0].env.forks[0].variables).toEqual([{name: 'unused', value: '{{unchanged}}'}])
+  expect(saved.collections[0].chosenEnv).toBe('imported')
   await click(panel, '#dismiss-collection-import')
   await expectHidden(panel, '#collection-import-notice')
   await panel.getByRole('button', {name: 'Collapse Imported Widget API', exact: true}).click()
@@ -72,11 +75,11 @@ async function importAndSend({extension, api}) {
   await expectValue(panel, '#auth-type', 'bearer')
   await expectValue(panel, '#bearer-token', 'folder-token')
   await capture(panel, 'postman-loaded-inherited-auth')
-  // Imported requests are linked too: templates require a chosen collection env.
+  // The imported fork is chosen, but the file did not supply the name used by this request.
   const count = api.requests.length
   await click(panel, '#send-request')
   await expect(panel.locator('#request-error')).toContainText('“name”')
-  await expect(panel.locator('#request-error')).toContainText('no env is chosen')
+  await expect(panel.locator('#request-error')).toContainText('env “imported”')
   expect(api.requests).toHaveLength(count)
   await click(panel, '#show-collections')
   await panel.locator('.collection-row').filter({has: panel.locator('[data-collection-name]')}).getByRole('button', {name: 'Environments', exact: true}).last().click()

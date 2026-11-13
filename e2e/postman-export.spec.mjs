@@ -75,7 +75,7 @@ test('cancels the credential note without downloading, then exports the saved ne
   expect(downloads).toHaveLength(1)
   expect(download.suggestedFilename()).toBe('Imported Widget API.postman_collection.json')
   expect(json.info).toEqual({name: 'Imported Widget API', _postman_id: 'fixture-widget-api', schema})
-  expect(json.variable).toEqual(before.collections[0].variables)
+  expect(json.variable).toEqual([{key: 'unused', value: ''}])
   expect(json.item.map(item => item.name)).toEqual(['Widgets', 'Health'])
   expect(json.item[0].item.map(item => item.name)).toEqual(['Writes', 'List widgets'])
   const item = json.item[0].item[0].item[0]
