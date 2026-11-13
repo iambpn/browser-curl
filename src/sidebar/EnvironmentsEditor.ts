@@ -1,7 +1,7 @@
-/** Collection-only env editing in the collections panel. All writes operate on fresh storage. */
-import {editCollectionEnv, loadCollection} from '../collections/collection-store'
+/** Edit one collection, folder, or request env. All writes operate on fresh storage. */
+import {editCollectionEnv, findCollectionLevel, loadCollection} from '../collections/collection-store'
 import type {Collection} from '../collections/collection-store'
-import {addBaseName, createEnv, createFork, removeBaseName, setForkValue} from '../env/env'
+import {addBaseName, collectionEnvs, createEnv, createFork, pickerOptions, removeBaseName, setForkValue} from '../env/env'
 import type {LevelEnv} from '../env/env'
 
 function element<T extends HTMLElement>(selector: string): T {
@@ -14,6 +14,7 @@ export class EnvironmentsEditor {
   private section = element('#env-editor')
   private error = element('#env-error')
   private collection: Collection | undefined
+  private levelId: string | undefined
   private tab: string | null = null
   private revision = 0
   private pending = 0
@@ -35,16 +36,20 @@ export class EnvironmentsEditor {
     })
   }
 
-  async open(id: string): Promise<void> {
+  async open(id: string, levelId = id): Promise<void> {
     const revision = ++this.revision
     try {
       const collection = await loadCollection(id)
       if (revision !== this.revision) return
       if (!collection) throw new Error('This collection is no longer available.')
+      const level = findCollectionLevel(collection, levelId)
+      if (!level) throw new Error('This item is no longer available.')
       this.collection = collection
+      this.levelId = levelId
       this.tab = null
       this.error.hidden = true
-      element('#env-collection-name').textContent = collection.name
+      const name = 'editor' in level ? level.editor.name : level.name
+      element('#env-collection-name').textContent = levelId === id ? name : `${collection.name} / ${name}`
       element<HTMLInputElement>('#env-fork-name').value = ''
       for (const selector of ['#collections-list', '#collections-empty', '.collections-toolbar', '#collection-item-form']) element(selector).hidden = true
       this.section.hidden = false
@@ -60,6 +65,7 @@ export class EnvironmentsEditor {
   private close = (): void => {
     this.revision++
     this.collection = undefined
+    this.levelId = undefined
     this.section.hidden = true
     element('#collections-list').hidden = false
     element('.collections-toolbar').hidden = false
@@ -77,7 +83,7 @@ export class EnvironmentsEditor {
     const buttons = this.section.querySelectorAll<HTMLButtonElement>('button[type="submit"]')
     for (const button of buttons) button.disabled = true
     try {
-      const updated = await editCollectionEnv(collection.id, change)
+      const updated = await editCollectionEnv(collection.id, change, this.levelId)
       if (revision !== this.revision) return
       this.collection = updated
       done()
@@ -101,7 +107,10 @@ export class EnvironmentsEditor {
   }
 
   private render(): void {
-    const env = this.collection?.env ?? createEnv()
+    const collection = this.collection
+    const env = (collection && this.levelId ? findCollectionLevel(collection, this.levelId)?.env : undefined) ?? createEnv()
+    element('#env-fork-suggestions').replaceChildren(...(collection ? pickerOptions(collectionEnvs(collection)) : [])
+      .filter(({name}) => name !== null).map(({label}) => new Option(label, label)))
     const tabs = [{id: null, name: 'Base'}, ...env.forks]
     element('#env-tabs').replaceChildren(...tabs.map(({id, name}) => {
       const tabId = id === null ? 'env-tab-base' : `env-tab-${id}`

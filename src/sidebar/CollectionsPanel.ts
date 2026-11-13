@@ -210,8 +210,8 @@ export class CollectionsPanel {
       row.append(this.action('Add folder', () => this.showCreate(collection.id, item.id === collection.id ? undefined : item.id)))
     }
     row.append(this.action('Rename', () => this.renameItem(collection.id, item.id, name, row, button)))
+    row.append(this.action('Environments', () => { void this.environments.open(collection.id, item.id) }))
     if (item.id === collection.id) {
-      row.append(this.action('Environments', () => { void this.environments.open(collection.id) }))
       row.append(this.action('Export', () => this.showExport(collection.id, name)))
     }
     row.append(this.action('Delete', () => { void this.deleteItem({collectionId: collection.id, itemId: item.id, name}) }))

@@ -11,7 +11,7 @@ async function capture(panel, name) {
 
 async function openEnvs(panel) {
   await click(panel, '#show-collections')
-  await panel.getByRole('button', {name: 'Environments', exact: true}).click()
+  await panel.locator('.collection-row').filter({has: panel.locator('[data-collection-name]')}).getByRole('button', {name: 'Environments', exact: true}).click()
   await expect(panel.locator('#env-editor')).toBeVisible()
 }
 

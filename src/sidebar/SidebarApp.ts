@@ -13,7 +13,7 @@ import {
 } from '../history/request-store'
 import {CollectionsPanel} from './CollectionsPanel'
 import {COLLECTION_INDEX_KEY, COLLECTION_KEY_PREFIX, chooseCollectionEnv, findCollectionRequest, loadCollection} from '../collections/collection-store'
-import {pickerOptions, resolveEditor} from '../env/env'
+import {collectionEnvs, pickerOptions, requestEnvChain, resolveEditor} from '../env/env'
 import {resolveRequestName} from '../history/request-state'
 import type {CollectionRequestLink, EditorState, HistorySummary, PanelSnapshot, SavedRequest} from '../history/request-state'
 
@@ -568,7 +568,7 @@ class SidebarApp {
       heading.textContent = collection.name
       heading.title = collection?.name ?? ''
       heading.hidden = !collection
-      picker.replaceChildren(...pickerOptions([collection.env]).map(({name, label}) => new Option(label, name ?? '')))
+      picker.replaceChildren(...pickerOptions(collectionEnvs(collection)).map(({name, label}) => new Option(label, name ?? '')))
       picker.value = collection.chosenEnv ?? ''
       picker.hidden = false
     } catch {
@@ -1172,9 +1172,10 @@ class SidebarApp {
       if (link) {
         // Wait for pending env edits and picker writes before taking the send's collection snapshot.
         const collection = await navigator.locks.request(COLLECTION_INDEX_KEY, () => loadCollection(link.collectionId))
-        if (collection && findCollectionRequest(collection, link.requestId)) {
+        const chain = collection && requestEnvChain(collection, link.requestId)
+        if (collection && chain) {
           existingLink = link
-          const result = resolveEditor([collection.env], collection.chosenEnv ?? null, editor)
+          const result = resolveEditor(chain, collection.chosenEnv ?? null, editor)
           if (result.missing) {
             const names = result.missing.map((name) => `“${name}”`).join(', ')
             const context = collection.chosenEnv ? `env “${collection.chosenEnv}”` : 'no env is chosen'

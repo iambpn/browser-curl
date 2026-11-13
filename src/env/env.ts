@@ -59,7 +59,28 @@ export function setForkValue(env: LevelEnv, forkId: string, name: string, value:
   variable.value = value
 }
 
-/** The empty option represents No env; callers render its label. Accept a chain for later nested levels. */
+/** The env module only needs the tree and IDs, not editor snapshots or storage. */
+interface EnvLevel {
+  id: string
+  env?: LevelEnv
+  requests?: readonly EnvLevel[]
+}
+
+/** Include every branch, since the chosen env belongs to the whole collection. */
+export function collectionEnvs(collection: EnvLevel): (LevelEnv | undefined)[] {
+  return [collection.env, ...(collection.requests ?? []).flatMap(collectionEnvs)]
+}
+
+/** A linked request resolves its own env, then its folders from inner to outer, then the collection. */
+export function requestEnvChain(collection: EnvLevel, requestId: string): (LevelEnv | undefined)[] | undefined {
+  if (!collection.requests) return collection.id === requestId ? [collection.env] : undefined
+  for (const item of collection.requests) {
+    const chain = requestEnvChain(item, requestId)
+    if (chain) return [...chain, collection.env]
+  }
+}
+
+/** The empty option represents No env; callers render its label. */
 export function pickerOptions(envs: readonly (LevelEnv | undefined)[]): {name: string | null; label: string}[] {
   const names = new Set(envs.flatMap((env) => env?.forks.map(({name}) => name) ?? []))
   return [{name: null, label: 'No env'}, ...[...names].sort().map((name) => ({name, label: name}))]
