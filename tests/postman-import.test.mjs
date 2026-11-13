@@ -15,6 +15,81 @@ function importedRequest(request) {
   return importPostmanCollection(file([{name: 'Send request', request}])).collection.requests[0].editor
 }
 
+test('imports collection, nested folder, and request variables as base names and imported forks', () => {
+  const {collection, warnings} = importPostmanCollection(file([
+    {name: 'Folder', variable: [{key: ' folder ', value: 'folder-value'}], item: [
+      {name: 'Nested', item: [{name: 'Request', variable: [{key: 'request', value: 'request-value'}], request: {url: '{{collection}}'}}]}
+    ]}
+  ], {variable: [{key: 'collection', value: 'collection-value'}]}))
+  const folder = collection.requests[0]
+  const request = folder.requests[0].requests[0]
+  for (const [level, name, value] of [[collection, 'collection', 'collection-value'], [folder, 'folder', 'folder-value'], [request, 'request', 'request-value']]) {
+    assert.deepEqual(level.env.baseNames, [name])
+    assert.equal(level.env.forks.length, 1)
+    assert.ok(level.env.forks[0].id)
+    assert.equal(level.env.forks[0].name, 'imported')
+    assert.deepEqual(level.env.forks[0].variables, [{name, value}])
+    assert.equal(level.variables, undefined)
+  }
+  assert.equal(collection.chosenEnv, 'imported')
+  assert.deepEqual(warnings, [])
+})
+
+test('trims and merges keys in first-name order, skips invalid keys with their paths, and ignores disabled values', () => {
+  const variable = [
+    {key: ' token ', value: 'first'}, {key: 'empty', value: ''},
+    {key: 'disabled', value: 'disabled-secret', disabled: true},
+    {key: 'token', value: 'last'}, {key: ' token ', value: ''},
+    {key: 'token', value: 'ignored', disabled: true}, {key: 'Token', value: 'case-sensitive'},
+    {key: 'zero', value: 0}, {key: 'false', value: false}, {key: 'space', value: ' '},
+    {key: '', value: 'invalid'}, {key: '  ', value: 'invalid'},
+    {key: 'bad{key', value: 'invalid'}, {key: 'bad}key', value: 'invalid'}
+  ]
+  const {collection, warnings} = importPostmanCollection(file([
+    {name: 'Folder', variable, item: [{name: 'Request', variable, request: {url: '{{token}}'}}]}
+  ], {variable}))
+  for (const level of [collection, collection.requests[0], collection.requests[0].requests[0]]) {
+    assert.deepEqual(level.env.baseNames, ['token', 'empty', 'disabled', 'Token', 'zero', 'false', 'space'])
+    assert.deepEqual(level.env.forks[0].variables, [
+      {name: 'token', value: 'last'}, {name: 'empty', value: ''}, {name: 'disabled', value: ''},
+      {name: 'Token', value: 'case-sensitive'}, {name: 'zero', value: '0'},
+      {name: 'false', value: 'false'}, {name: 'space', value: ' '}
+    ])
+  }
+  assert.equal(warnings.length, 4)
+  for (const key of ['', '  ', 'bad{key', 'bad}key']) {
+    const warning = warnings.find((warning) => warning.includes(JSON.stringify(key)))
+    assert.ok(warning, `Warning must identify ${JSON.stringify(key)}`)
+    assert.ok(warning.includes('Example API / Folder / Request'))
+    assert.ok(warning.includes('skipped'))
+  }
+})
+
+test('chooses No env for only empty or disabled variables, and imported for a fork only on a descendant', () => {
+  const emptyVariables = [{key: 'empty'}, {key: 'null', value: null}, {key: 'disabled', value: 'secret', disabled: true}]
+  for (const variable of [undefined, [], emptyVariables]) {
+    const {collection, warnings} = importPostmanCollection(file([
+      {name: 'Folder', variable, item: [{name: 'Request', variable, request: {url: '{{empty}}'}}]}
+    ], {variable}))
+    assert.equal(collection.chosenEnv, null)
+    for (const level of [collection, collection.requests[0], collection.requests[0].requests[0]]) {
+      assert.deepEqual(level.env.forks, [])
+      assert.deepEqual(level.env.baseNames, variable ? variable.map(({key}) => key) : [])
+    }
+    assert.deepEqual(warnings, [])
+  }
+  for (const onRequest of [false, true]) {
+    const variable = [{key: 'child', value: 'value'}]
+    const {collection} = importPostmanCollection(file([
+      {name: 'Folder', variable: onRequest ? [] : variable, item: [
+        {name: 'Request', variable: onRequest ? variable : [], request: {url: '{{child}}'}}
+      ]}
+    ]))
+    assert.deepEqual(collection.env.forks, [])
+    assert.equal(collection.chosenEnv, 'imported')
+  }
+})
+
 test('reads string URLs and raw object URLs as text and keeps disabled query and header rows', () => {
   for (const url of ['{{baseUrl}}/search?q={{term}}&tag=a%20b', {raw: '{{baseUrl}}/search?q={{term}}&tag=a%20b'}]) {
     const editor = importedRequest({url})
@@ -122,7 +197,8 @@ test('imports v2.1 and v2.0 into the same named collection with metadata and ord
   assert.deepEqual(result, importPostmanCollection(file(items, {variable}, '2.0.0')))
   assert.equal(result.collection.name, 'Example API')
   assert.equal(result.collection.postmanId, 'postman-id')
-  assert.deepEqual(result.collection.variables, variable)
+  assert.deepEqual(result.collection.env, {baseNames: ['baseUrl'], forks: []})
+  assert.equal(result.collection.variables, undefined)
   assert.deepEqual(result.collection.requests.map((item) => item.name ?? item.editor.name), ['First', 'Folder', 'After folder'])
   assert.equal(result.collection.requests[1].requests[0].requests[0].editor.name, 'Last')
   assert.equal(result.collection.requests[0].editor.url, '{{baseUrl}}/first')

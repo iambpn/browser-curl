@@ -1,9 +1,9 @@
 /** Collections keep complete editor snapshots locally, independently of sent-request history. */
 import type {CollectionRequestLink, EditorState} from '../history/request-state'
-import {readStorage, removeStorage, writeStorage} from '../shared/storage'
+import {readStorage, removeStorage, writeStorage} from '../shared/storage.ts'
 import type {ImportedCollection, ImportedItem} from './postman-converter'
-import {exportPostmanCollection} from './postman-converter'
-import {collectionEnvs, createEnv, pickerOptions, resetMissingChosenEnv} from '../env/env'
+import {exportPostmanCollection, importPostmanEnv} from './postman-converter.ts'
+import {addBaseName, collectionEnvs, createEnv, createFork, pickerOptions, resetMissingChosenEnv, setForkValue} from '../env/env.ts'
 import type {LevelEnv} from '../env/env'
 
 /** One entry in the collection index, in creation order. */
@@ -35,6 +35,7 @@ export interface Collection extends CollectionSummary {
   env?: LevelEnv
   chosenEnv?: string | null
   postmanId?: string
+  /** Legacy Postman variables, consumed and removed on the first read. */
   variables?: unknown[]
 }
 
@@ -46,9 +47,9 @@ export function saveImportedCollection(imported: ImportedCollection): Promise<st
   const snapshot = structuredClone(imported)
   return navigator.locks.request(COLLECTION_INDEX_KEY, async () => {
     const identify = (item: ImportedItem): CollectionItem => 'editor' in item
-      ? {id: crypto.randomUUID(), editor: item.editor}
-      : {id: crypto.randomUUID(), name: item.name, requests: item.requests.map(identify)}
-    const collection: Collection = {...snapshot, id: crypto.randomUUID(), requests: snapshot.requests.map(identify), env: createEnv(), chosenEnv: null}
+      ? {...item, id: crypto.randomUUID()}
+      : {...item, id: crypto.randomUUID(), requests: item.requests.map(identify)}
+    const collection: Collection = {...snapshot, id: crypto.randomUUID(), requests: snapshot.requests.map(identify), env: snapshot.env ?? createEnv(), chosenEnv: snapshot.chosenEnv ?? null}
     const index = await listCollections()
     index.push({id: collection.id, name: collection.name})
     await writeStorage({[COLLECTION_KEY_PREFIX + collection.id]: collection, [COLLECTION_INDEX_KEY]: index})
@@ -62,17 +63,42 @@ export async function listCollections(): Promise<CollectionSummary[]> {
   return (items[COLLECTION_INDEX_KEY] as CollectionSummary[] | undefined) ?? []
 }
 
-/** Read one collection, or undefined if it no longer exists. */
-export async function loadCollection(id: string): Promise<Collection | undefined> {
+/** Ordinary reads stay available during pending edits; sending waits for the latest saved envs. */
+export async function loadCollection(id: string, options: {waitForWrites?: boolean} = {}): Promise<Collection | undefined> {
+  if (options.waitForWrites) return navigator.locks.request(COLLECTION_INDEX_KEY, () => readCollection(id))
+  const items = await readStorage(COLLECTION_KEY_PREFIX + id)
+  const collection = items[COLLECTION_KEY_PREFIX + id] as Collection | undefined
+  // Re-read under the write lock when migration is needed, since an edit may have happened meanwhile.
+  return collection?.variables !== undefined
+    ? navigator.locks.request(COLLECTION_INDEX_KEY, () => readCollection(id)) : collection
+}
+
+/** Caller holds the collection lock, so migration cannot overwrite an edit or restore a deleted record. */
+async function readCollection(id: string): Promise<Collection | undefined> {
   const key = COLLECTION_KEY_PREFIX + id
   const items = await readStorage(key)
-  return items[key] as Collection | undefined
+  const collection = items[key] as Collection | undefined
+  if (collection?.variables !== undefined) {
+    const imported = importPostmanEnv(collection.variables)
+    const env = collection.env ??= createEnv()
+    for (const name of imported.baseNames) if (!env.baseNames.includes(name)) addBaseName(env, name)
+    if (imported.forks.length) {
+      const fork = env.forks.find(({name}) => name === 'imported') ?? createFork(env, imported.forks[0].id, 'imported')
+      for (const {name, value} of imported.forks[0].variables) {
+        if (!fork.variables.find((variable) => variable.name === name)?.value) setForkValue(env, fork.id, name, value)
+      }
+      collection.chosenEnv ??= 'imported'
+    } else collection.chosenEnv ??= null
+    delete collection.variables
+    await writeStorage({[key]: collection})
+  }
+  return collection
 }
 
 /** Export the latest saved tree and persist its Postman ID before offering a download. */
 export function exportCollection(id: string): Promise<{json: string; fileName: string}> {
   return navigator.locks.request(COLLECTION_INDEX_KEY, async () => {
-    const collection = await loadCollection(id)
+    const collection = await readCollection(id)
     if (!collection) throw new Error('This collection is no longer available.')
     const savedId = collection.postmanId
     const result = exportPostmanCollection(collection)
@@ -93,7 +119,7 @@ export function addCollectionRequest(
     if (!snapshot.name.trim()) throw new Error('Enter a request name.')
     const request: CollectionRequest = {id: crypto.randomUUID(), editor: snapshot}
     if ('id' in destination) {
-      const collection = await loadCollection(destination.id)
+      const collection = await readCollection(destination.id)
       if (!collection) throw new Error('This collection is no longer available. Choose another collection.')
       childrenOf(collection, destination.folderId).push(request)
       await writeStorage({[COLLECTION_KEY_PREFIX + collection.id]: collection})
@@ -117,7 +143,7 @@ export function addCollectionRequest(
 export function updateCollectionRequest(link: CollectionRequestLink, editor: EditorState): Promise<boolean> {
   const snapshot = structuredClone(editor)
   return navigator.locks.request(COLLECTION_INDEX_KEY, async () => {
-    const collection = await loadCollection(link.collectionId)
+    const collection = await readCollection(link.collectionId)
     const request = collection && findCollectionRequest(collection, link.requestId)
     if (!collection || !request) return false
     if (!snapshot.name.trim()) throw new Error('Enter a request name.')
@@ -171,7 +197,7 @@ export function createCollection(name: string): Promise<void> {
 /** Apply env edits to the latest saved collection under the same lock as all collection writes. */
 export function editCollectionEnv(id: string, edit: (env: LevelEnv) => void, levelId = id): Promise<Collection> {
   return navigator.locks.request(COLLECTION_INDEX_KEY, async () => {
-    const collection = await loadCollection(id)
+    const collection = await readCollection(id)
     if (!collection) throw new Error('This collection is no longer available.')
     const level = findCollectionLevel(collection, levelId)
     if (!level) throw new Error('This item is no longer available.')
@@ -186,7 +212,7 @@ export function editCollectionEnv(id: string, edit: (env: LevelEnv) => void, lev
 /** Persist the picker selection independently of the current request's editor snapshot. */
 export function chooseCollectionEnv(id: string, name: string | null): Promise<void> {
   return navigator.locks.request(COLLECTION_INDEX_KEY, async () => {
-    const collection = await loadCollection(id)
+    const collection = await readCollection(id)
     if (!collection) throw new Error('This collection is no longer available.')
     if (!pickerOptions(collectionEnvs(collection)).some((option) => option.name === name)) throw new Error('This env is no longer available.')
     collection.chosenEnv = name
@@ -199,7 +225,7 @@ export function addCollectionFolder(collectionId: string, name: string, folderId
   return navigator.locks.request(COLLECTION_INDEX_KEY, async () => {
     name = name.trim()
     if (!name) throw new Error('Enter a folder name.')
-    const collection = await loadCollection(collectionId)
+    const collection = await readCollection(collectionId)
     if (!collection) throw new Error('This collection is no longer available.')
     childrenOf(collection, folderId).push({id: crypto.randomUUID(), name, requests: []})
     await writeStorage({[COLLECTION_KEY_PREFIX + collection.id]: collection})
@@ -211,7 +237,7 @@ export function renameCollectionItem(collectionId: string, itemId: string, name:
   return navigator.locks.request(COLLECTION_INDEX_KEY, async () => {
     name = name.trim()
     if (!name) throw new Error('Enter a name.')
-    const collection = await loadCollection(collectionId)
+    const collection = await readCollection(collectionId)
     if (!collection) throw new Error('This collection is no longer available.')
     const item = itemId === collectionId ? collection : findCollectionItem(collection, itemId)
     if (!item) throw new Error('This item is no longer available.')
@@ -231,7 +257,7 @@ export function renameCollectionItem(collectionId: string, itemId: string, name:
 /** Recheck content under the lock so a concurrently filled container also needs confirmation. */
 export function deleteCollectionItem(collectionId: string, itemId: string, confirmed = false): Promise<boolean> {
   return navigator.locks.request(COLLECTION_INDEX_KEY, async () => {
-    const collection = await loadCollection(collectionId)
+    const collection = await readCollection(collectionId)
     if (itemId === collectionId) {
       if (collection?.requests.length && !confirmed) return false
       const index = (await listCollections()).filter(({id}) => id !== collectionId)

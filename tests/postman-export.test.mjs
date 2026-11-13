@@ -157,17 +157,65 @@ test('custom auth becomes noauth and one enabled Authorization header, replacing
   assert.equal(editor.headers.length, 4)
 })
 
-test('keeps the collection variable list unchanged and a stable saved or generated Postman ID', () => {
+test('exports collection base names with empty values and a stable saved or generated Postman ID', () => {
   const variable = [{key: 'baseUrl', value: '{{host}}', type: 'string', disabled: true, extra: {kept: [1, 2]}}]
   const source = collection([], {variable})
   const first = exported(source)
   assert.match(first.info._postman_id, /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/)
   assert.equal(source.postmanId, first.info._postman_id)
   assert.deepEqual(exported(structuredClone(source)), first)
-  assert.deepEqual(first.variable, variable)
+  assert.deepEqual(first.variable, [{key: 'baseUrl', value: ''}])
   source.postmanId = 'imported-id'
   assert.equal(exported(source).info._postman_id, 'imported-id')
   assert.equal(exported(collection()).variable, undefined)
+})
+
+test('exports only base names in base order at each level, omitting all forks and empty lists', () => {
+  const source = collection([
+    {name: 'Folder', item: [{name: 'Request', request: {url: '{{url}}'}}]},
+    {name: 'Empty folder', item: []}, {name: 'Empty request', request: {url: '{{url}}'}}
+  ])
+  const folder = source.requests[0]
+  const request = folder.requests[0]
+  for (const [level, names] of [[source, ['url', 'token']], [folder, ['folder']], [request, ['request', 'token']]]) {
+    level.env = {baseNames: names, forks: ['local', 'staging'].map(name => ({
+      id: `${name}-id`, name, variables: [...names, 'fork-only'].map(name => ({name, value: `secret-${name}`}))
+    }))}
+  }
+  // A fork-only level has no base list to share.
+  source.requests[1].env = {baseNames: [], forks: [{id: 'private', name: 'private', variables: [{name: 'private-name', value: 'private-value'}]}]}
+  source.chosenEnv = 'local'
+  const before = structuredClone(source)
+  const result = exported(source)
+  assert.deepEqual(result.variable, [{key: 'url', value: ''}, {key: 'token', value: ''}])
+  assert.deepEqual(result.item[0].variable, [{key: 'folder', value: ''}])
+  assert.deepEqual(result.item[0].item[0].variable, [{key: 'request', value: ''}, {key: 'token', value: ''}])
+  assert.equal('variable' in result.item[1], false)
+  assert.equal('variable' in result.item[2], false)
+  for (const privateText of ['secret-', 'fork-only', 'private-name', 'private-value', 'forks', 'chosenEnv', 'staging', 'local-id']) {
+    assert.ok(!JSON.stringify(result).includes(privateText), privateText)
+  }
+  assert.deepEqual(source, {...before, postmanId: result.info._postman_id})
+})
+
+test('import then export keeps variable names at the collection, nested folders, and request levels', () => {
+  const variable = (key) => [{key, value: `secret-${key}`}]
+  const source = collection([
+    {name: 'Folder', variable: variable('folder'), item: [
+      {name: 'Nested', variable: variable('nested'), item: [
+        {name: 'Request', variable: variable('request'), request: {url: '{{url}}'}}
+      ]}
+    ]}
+  ], {variable: [...variable('url'), {key: 'empty', value: ''}]})
+  const first = exported(source)
+  assert.deepEqual(first.variable, [{key: 'url', value: ''}, {key: 'empty', value: ''}])
+  assert.deepEqual(first.item[0].variable, [{key: 'folder', value: ''}])
+  assert.deepEqual(first.item[0].item[0].variable, [{key: 'nested', value: ''}])
+  assert.deepEqual(first.item[0].item[0].item[0].variable, [{key: 'request', value: ''}])
+  const again = importPostmanCollection(JSON.stringify(first))
+  assert.equal(again.collection.chosenEnv, null)
+  assert.deepEqual(exported(again.collection), first)
+  assert.deepEqual(again.warnings, [])
 })
 
 test('replaces forbidden filename characters while keeping the collection name inside the JSON', () => {
@@ -184,7 +232,10 @@ test('importing then exporting a fixture keeps every supported part and omits dr
   assert.ok(imported.warnings.length > 0)
   const {json} = exportPostmanCollection(imported.collection)
   const again = importPostmanCollection(json)
-  assert.deepEqual(again.collection, imported.collection)
+  const shared = structuredClone(imported.collection)
+  shared.env.forks = []
+  shared.chosenEnv = null
+  assert.deepEqual(again.collection, shared)
   assert.deepEqual(again.warnings, [])
   const result = JSON.parse(json)
   assert.equal(result.info._postman_id, 'fixture-widget-api')

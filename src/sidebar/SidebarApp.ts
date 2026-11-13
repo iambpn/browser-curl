@@ -12,7 +12,7 @@ import {
   HISTORY_INDEX_KEY, HISTORY_KEY_PREFIX, listHistorySummaries, loadSavedRequest, loadWorkspace, saveWorkspace
 } from '../history/request-store'
 import {CollectionsPanel} from './CollectionsPanel'
-import {COLLECTION_INDEX_KEY, COLLECTION_KEY_PREFIX, chooseCollectionEnv, findCollectionRequest, loadCollection} from '../collections/collection-store'
+import {COLLECTION_KEY_PREFIX, chooseCollectionEnv, findCollectionRequest, loadCollection} from '../collections/collection-store'
 import {collectionEnvs, pickerOptions, requestEnvChain, resolveEditor} from '../env/env'
 import {resolveRequestName} from '../history/request-state'
 import type {CollectionRequestLink, EditorState, HistorySummary, PanelSnapshot, SavedRequest} from '../history/request-state'
@@ -1171,7 +1171,7 @@ class SidebarApp {
       let existingLink: CollectionRequestLink | undefined
       if (link) {
         // Wait for pending env edits and picker writes before taking the send's collection snapshot.
-        const collection = await navigator.locks.request(COLLECTION_INDEX_KEY, () => loadCollection(link.collectionId))
+        const collection = await loadCollection(link.collectionId, {waitForWrites: true})
         const chain = collection && requestEnvChain(collection, link.requestId)
         if (collection && chain) {
           existingLink = link
