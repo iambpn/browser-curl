@@ -79,7 +79,7 @@ async function importAndSend({extension, api}) {
   await expect(panel.locator('#request-error')).toContainText('no env is chosen')
   expect(api.requests).toHaveLength(count)
   await click(panel, '#show-collections')
-  await panel.getByRole('button', {name: 'Environments', exact: true}).last().click()
+  await panel.locator('.collection-row').filter({has: panel.locator('[data-collection-name]')}).getByRole('button', {name: 'Environments', exact: true}).last().click()
   await panel.locator('#env-base-name').fill('name')
   await click(panel, '#env-add-name')
   await expect(panel.locator('#env-base-name')).toHaveValue('')

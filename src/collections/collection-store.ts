@@ -3,7 +3,7 @@ import type {CollectionRequestLink, EditorState} from '../history/request-state'
 import {readStorage, removeStorage, writeStorage} from '../shared/storage'
 import type {ImportedCollection, ImportedItem} from './postman-converter'
 import {exportPostmanCollection} from './postman-converter'
-import {createEnv, pickerOptions} from '../env/env'
+import {collectionEnvs, createEnv, pickerOptions} from '../env/env'
 import type {LevelEnv} from '../env/env'
 
 /** One entry in the collection index, in creation order. */
@@ -16,6 +16,7 @@ export interface CollectionSummary {
 export interface CollectionRequest {
   id: string
   editor: EditorState
+  env?: LevelEnv
 }
 
 /** A folder's children keep insertion order, including folders nested to any depth. */
@@ -23,6 +24,7 @@ export interface CollectionFolder {
   id: string
   name: string
   requests: CollectionItem[]
+  env?: LevelEnv
 }
 
 export type CollectionItem = CollectionRequest | CollectionFolder
@@ -136,6 +138,11 @@ function findCollectionItem(collection: Collection | CollectionFolder, id: strin
   }
 }
 
+/** Locate the env's owner without depending on its current place in the tree. */
+export function findCollectionLevel(collection: Collection, id: string): Collection | CollectionItem | undefined {
+  return id === collection.id ? collection : findCollectionItem(collection, id)
+}
+
 /** Resolve request links independently of the folder that currently contains them. */
 export function findCollectionRequest(collection: Collection, id: string): CollectionRequest | undefined {
   const item = findCollectionItem(collection, id)
@@ -162,12 +169,15 @@ export function createCollection(name: string): Promise<void> {
 }
 
 /** Apply env edits to the latest saved collection under the same lock as all collection writes. */
-export function editCollectionEnv(id: string, edit: (env: LevelEnv) => void): Promise<Collection> {
+export function editCollectionEnv(id: string, edit: (env: LevelEnv) => void, levelId = id): Promise<Collection> {
   return navigator.locks.request(COLLECTION_INDEX_KEY, async () => {
     const collection = await loadCollection(id)
     if (!collection) throw new Error('This collection is no longer available.')
-    collection.env ??= createEnv()
-    edit(collection.env)
+    const level = findCollectionLevel(collection, levelId)
+    if (!level) throw new Error('This item is no longer available.')
+    level.env ??= createEnv()
+    edit(level.env)
+    resetMissingChosenEnv(collection)
     await writeStorage({[COLLECTION_KEY_PREFIX + id]: collection})
     return collection
   })
@@ -178,10 +188,17 @@ export function chooseCollectionEnv(id: string, name: string | null): Promise<vo
   return navigator.locks.request(COLLECTION_INDEX_KEY, async () => {
     const collection = await loadCollection(id)
     if (!collection) throw new Error('This collection is no longer available.')
-    if (!pickerOptions([collection.env]).some((option) => option.name === name)) throw new Error('This env is no longer available.')
+    if (!pickerOptions(collectionEnvs(collection)).some((option) => option.name === name)) throw new Error('This env is no longer available.')
     collection.chosenEnv = name
     await writeStorage({[COLLECTION_KEY_PREFIX + id]: collection})
   })
+}
+
+/** Removing a level or its last matching fork also removes a stale collection selection. */
+function resetMissingChosenEnv(collection: Collection): void {
+  if (collection.chosenEnv && !pickerOptions(collectionEnvs(collection)).some(({name}) => name === collection.chosenEnv)) {
+    collection.chosenEnv = null
+  }
 }
 
 /** Append a folder to a collection or folder, preserving creation order. */
@@ -243,6 +260,7 @@ export function deleteCollectionItem(collectionId: string, itemId: string, confi
       return parent.requests.some((child) => 'requests' in child && remove(child))
     }
     remove(collection)
+    resetMissingChosenEnv(collection)
     await writeStorage({[COLLECTION_KEY_PREFIX + collectionId]: collection})
     return true
   })

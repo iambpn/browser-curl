@@ -1,7 +1,7 @@
 /** Public env operations and resolution, independent of extension APIs. */
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {addBaseName, createEnv, createFork, removeBaseName, setForkValue, pickerOptions, resolveEditor} from '../src/env/env.ts'
+import {addBaseName, createEnv, createFork, removeBaseName, setForkValue, pickerOptions, resolveEditor, collectionEnvs, requestEnvChain} from '../src/env/env.ts'
 import {editorFixture} from './helpers/extension-storage.mjs'
 
 test('adding a base name gives every fork an empty value', () => {
@@ -144,4 +144,48 @@ test('resolution walks inner to outer, skipping absent forks and empty values', 
     valuesEnv({a: 'request', b: ''}), valuesEnv({b: 'ignored'}, 'other'),
     valuesEnv({a: 'folder', b: 'folder'}), valuesEnv({b: 'outer', c: 'collection'})
   ], 'local', editor).editor.url, 'request/folder/collection')
+})
+
+function envTree() {
+  return {id: 'collection', env: valuesEnv({value: 'collection', outer: 'collection'}), requests: [
+    {id: 'outside', env: valuesEnv({outside: 'outside'}, 'zebra')},
+    {id: 'outer', env: valuesEnv({value: 'outer', outer: 'outer'}), requests: [
+      {id: 'inner', env: valuesEnv({value: 'inner'}), requests: [
+        {id: 'request', env: valuesEnv({value: 'request'})},
+        {id: 'empty', env: valuesEnv({value: ''})},
+        {id: 'other', env: valuesEnv({value: 'ignored'}, 'folder-only')},
+        {id: 'legacy'}
+      ]}
+    ]}
+  ]}
+}
+
+function resolveTree(tree, requestId) {
+  return resolveEditor(requestEnvChain(tree, requestId), 'local',
+    {...editorFixture(), url: '{{value}}/{{outer}}', authType: 'none'}).editor.url
+}
+
+test('request env overrides its folder while missing names continue through the ancestors', () => {
+  assert.equal(resolveTree(envTree(), 'request'), 'request/outer')
+})
+
+test('inner folder overrides the outer folder and collection, including legacy requests with no env', () => {
+  assert.equal(resolveTree(envTree(), 'legacy'), 'inner/outer')
+})
+
+test('request levels without the chosen fork are skipped', () => {
+  assert.equal(resolveTree(envTree(), 'other'), 'inner/outer')
+})
+
+test('empty request and inner folder values fall through to the nearest nonempty ancestor', () => {
+  const tree = envTree()
+  tree.requests[1].requests[0].env.forks[0].variables[0].value = ''
+  assert.equal(resolveTree(tree, 'empty'), 'outer/outer')
+})
+
+test('picker includes unique sorted fork names from the entire tree, including other request branches', () => {
+  const tree = envTree()
+  assert.deepEqual(pickerOptions(collectionEnvs(tree)).map(({name}) => name), [null, 'folder-only', 'local', 'zebra'])
+  assert.equal(requestEnvChain(tree, 'deleted'), undefined)
+  assert.equal(requestEnvChain(tree, 'inner'), undefined, 'folders are not linked requests')
 })

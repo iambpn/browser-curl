@@ -265,7 +265,8 @@
         <form id="env-fork-form" class="env-form">
           <label class="field-label" for="env-fork-name">Fork name</label>
           <div class="env-input-row">
-            <input id="env-fork-name" class="auth-input" autocomplete="off" />
+            <input id="env-fork-name" class="auth-input" autocomplete="off" list="env-fork-suggestions" />
+            <datalist id="env-fork-suggestions"></datalist>
             <button id="env-new-fork" class="history-button" type="submit">New fork</button>
           </div>
         </form>
