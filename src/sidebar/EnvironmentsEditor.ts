@@ -19,6 +19,7 @@ export class EnvironmentsEditor {
   private revision = 0
   private pending = 0
   private completions: Array<{revision: number, run: () => void}> = []
+  private unsavedValues = new Map<string, {value: string}>()
   private renamingBase: string | null = null
   private renamingFork = false
   private confirmingDelete = false
@@ -51,6 +52,7 @@ export class EnvironmentsEditor {
       if (!level) throw new Error('This item is no longer available.')
       this.collection = collection
       this.levelId = levelId
+      this.unsavedValues.clear()
       this.tab = null
       this.resetActions()
       this.error.hidden = true
@@ -72,6 +74,7 @@ export class EnvironmentsEditor {
     this.revision++
     this.collection = undefined
     this.levelId = undefined
+    this.unsavedValues.clear()
     this.section.hidden = true
     element('#collections-list').hidden = false
     element('.collections-toolbar').hidden = false
@@ -104,7 +107,7 @@ export class EnvironmentsEditor {
       if (!this.pending) {
         for (const button of this.section.querySelectorAll<HTMLButtonElement>('button:not(#env-close)')) button.disabled = false
         // A structural write can finish before value edits made while it was saving.
-        // Rebuild only once the saved collection includes every queued edit.
+        // Wait for all queued writes; renders retain values whose saves failed.
         const completions = this.completions
         this.completions = []
         for (const completion of completions) if (completion.revision === this.revision) completion.run()
@@ -182,6 +185,8 @@ export class EnvironmentsEditor {
   private render(): void {
     const collection = this.collection
     const env = (collection && this.levelId ? findCollectionLevel(collection, this.levelId)?.env : undefined) ?? createEnv()
+    const variableKeys = new Set(env.forks.flatMap((fork) => fork.variables.map(({name}) => JSON.stringify([fork.id, name]))))
+    for (const key of this.unsavedValues.keys()) if (!variableKeys.has(key)) this.unsavedValues.delete(key)
     element('#env-fork-suggestions').replaceChildren(...(collection ? pickerOptions(collectionEnvs(collection)) : [])
       .filter(({name}) => name !== null).map(({label}) => new Option(label, label)))
     const tabs = [{id: null, name: 'Base'}, ...env.forks]
@@ -294,11 +299,17 @@ export class EnvironmentsEditor {
         input.id = label.htmlFor
         input.className = 'auth-input'
         input.setAttribute('aria-label', `Value for ${name}`)
-        input.value = value
+        const key = JSON.stringify([fork.id, name])
+        input.value = this.unsavedValues.get(key)?.value ?? value
         input.autocomplete = 'off'
         input.addEventListener('input', () => {
-          const value = input.value
-          void this.edit((env) => setForkValue(env, fork.id, name, value), () => {})
+          // Keep failed edits through structural renders, and never let an older
+          // successful write clear text entered while that write was pending.
+          const draft = {value: input.value}
+          this.unsavedValues.set(key, draft)
+          void this.edit((env) => setForkValue(env, fork.id, name, draft.value), () => {
+            if (this.unsavedValues.get(key) === draft) this.unsavedValues.delete(key)
+          })
         })
         const heading = document.createElement('div')
         heading.className = 'env-variable-heading'

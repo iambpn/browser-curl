@@ -161,6 +161,59 @@ test('editing a value while a fork rename is saving preserves the live value and
   await proof(panel, 'env-rename-subsequent-edit-saved')
 })
 
+test('a failed value save during fork rename keeps the unsaved text across renders for retry', async ({extension, api}) => {
+  const panel = await extension.openPanel()
+  await setup(panel, api, 'API')
+  await addBase(panel, 'token')
+  await newFork(panel, 'local')
+  const token = panel.getByRole('textbox', {name: 'Value for token', exact: true})
+  await token.fill('old')
+  await click(panel, '#env-rename-fork')
+  await fill(panel, '#env-rename-fork-name', 'staging')
+
+  // Hold the real rename acknowledgement and fail the following value write.
+  await panel.evaluate(() => {
+    const set = chrome.storage.local.set.bind(chrome.storage.local)
+    let renamed = false
+    chrome.storage.local.set = (items, callback) => {
+      if (!Object.keys(items).some((key) => key.startsWith('browsercurl.collection.'))) return set(items, callback)
+      if (!renamed) {
+        renamed = true
+        return set(items, () => { window.finishEnvRename = callback })
+      }
+      chrome.storage.local.set = set
+      throw new Error('Storage quota exceeded')
+    }
+  })
+  await click(panel, '#env-save-fork-name')
+  await panel.waitForFunction(() => typeof window.finishEnvRename === 'function')
+  await token.fill('new-value')
+  await panel.evaluate(() => window.finishEnvRename())
+  await expect(panel.getByRole('tab', {name: 'staging', exact: true})).toHaveAttribute('aria-selected', 'true')
+  await expect(panel.locator('#env-error')).toBeVisible()
+  await expect(panel.locator('#env-error')).toHaveText('Storage quota exceeded')
+  await expect(token).toHaveValue('new-value')
+  expect((await panel.evaluate(storedCollections)).collections[0].env.forks[0].variables[0].value).toBe('old')
+  await proof(panel, 'env-rename-failed-value-retained')
+
+  // Further renders must also retain the failed edit until the user retries it.
+  await panel.getByRole('tab', {name: 'Base', exact: true}).click()
+  await panel.getByRole('tab', {name: 'staging', exact: true}).click()
+  await expect(token).toHaveValue('new-value')
+  await token.press('End')
+  await token.pressSequentially('-retried')
+  await expect(panel.locator('#env-rename-fork')).toBeEnabled()
+  await closeEnv(panel)
+  await panel.locator('#env-picker').selectOption('staging')
+  await fill(panel, '#request-url', `${api.origin}/echo?token={{token}}`)
+  await send(panel)
+  expect((await echoedRequest(panel)).url).toBe('/echo?token=new-value-retried')
+  await openEnv(panel, 'API')
+  await panel.getByRole('tab', {name: 'staging', exact: true}).click()
+  await expect(token).toHaveValue('new-value-retried')
+  await proof(panel, 'env-rename-failed-value-retried')
+})
+
 for (const level of ['API', 'Folder', 'Request']) {
   test(`rename a base name at ${level}: forks keep the old value and gain the new name empty`, async ({extension, api}) => {
     const panel = await extension.openPanel()
