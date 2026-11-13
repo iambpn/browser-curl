@@ -189,6 +189,23 @@ export class EnvironmentsEditor {
     })
   }
 
+  /** A save may finish after the user has moved into another field. */
+  private renderKeepingInput(fallback?: string): void {
+    const active = document.activeElement
+    const input = active instanceof HTMLInputElement && this.section.contains(active) ? active : null
+    const selection = input ? [input.selectionStart, input.selectionEnd, input.selectionDirection ?? undefined] as const : null
+    this.render()
+    // Row indices change when a preceding variable is deleted; follow its identity.
+    const restored = input && Array.from(this.section.querySelectorAll<HTMLInputElement>('input')).find((candidate) =>
+      input.dataset.variableKey ? candidate.dataset.variableKey === input.dataset.variableKey : candidate.id === input.id)
+    if (restored) {
+      restored.focus()
+      if (selection) restored.setSelectionRange(...selection)
+    } else if (fallback) {
+      element(fallback).focus()
+    }
+  }
+
   private render(): void {
     const collection = this.collection
     const env = (collection && this.levelId ? findCollectionLevel(collection, this.levelId)?.env : undefined) ?? createEnv()
@@ -267,19 +284,8 @@ export class EnvironmentsEditor {
       if (this.renamingFork) {
         const form = this.nameForm('env-rename-fork-name', 'env-save-fork-name', 'Fork name', 'Save name', (name) => {
           void this.edit((env) => renameFork(env, fork.id, name), () => {
-            // The user may have moved into a value field while the rename saved.
-            const active = document.activeElement
-            const input = active instanceof HTMLInputElement && this.section.contains(active) ? active : null
-            const selection = input ? [input.selectionStart, input.selectionEnd, input.selectionDirection ?? undefined] as const : null
             this.renamingFork = false
-            this.render()
-            const restored = input && document.getElementById(input.id)
-            if (restored instanceof HTMLInputElement) {
-              restored.focus()
-              if (selection) restored.setSelectionRange(...selection)
-            } else {
-              element('#env-rename-fork').focus()
-            }
+            this.renderKeepingInput('#env-rename-fork')
           })
         }, fork.name, () => { this.renamingFork = false; this.render(); element('#env-rename-fork').focus() })
         form.querySelector('input')!.setAttribute('list', 'env-fork-suggestions')
@@ -317,6 +323,7 @@ export class EnvironmentsEditor {
         input.className = 'auth-input'
         input.setAttribute('aria-label', `Value for ${name}`)
         const key = JSON.stringify([fork.id, name])
+        input.dataset.variableKey = key
         input.value = this.unsavedValues.get(key)?.value ?? value
         input.autocomplete = 'off'
         input.addEventListener('input', () => {
@@ -337,7 +344,7 @@ export class EnvironmentsEditor {
           mark.textContent = 'From base'
           heading.append(mark)
         } else {
-          const remove = this.button('Delete', () => { void this.edit((env) => deleteForkVariable(env, fork.id, name)) })
+          const remove = this.button('Delete', () => { void this.edit((env) => deleteForkVariable(env, fork.id, name), () => this.renderKeepingInput()) })
           remove.setAttribute('aria-label', `Delete ${name}`)
           heading.append(remove)
         }
@@ -346,8 +353,7 @@ export class EnvironmentsEditor {
       }
       content.append(this.nameForm('env-variable-name', 'env-add-variable', 'Fork-only variable name', 'Add variable', (name) => {
         void this.edit((env) => addForkVariable(env, fork.id, name), () => {
-          this.render()
-          element('#env-variable-name').focus()
+          this.renderKeepingInput('#env-variable-name')
         })
       }))
     }

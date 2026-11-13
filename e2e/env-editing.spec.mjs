@@ -177,6 +177,71 @@ for (const selection of ['caret', 'selection']) {
   })
 }
 
+for (const operation of ['add', 'delete']) {
+  for (const selection of ['caret', 'selection']) {
+    test(`typing through a fork-only ${operation} save preserves value focus and ${selection}`, async ({extension, api}) => {
+      const panel = await extension.openPanel()
+      await setup(panel, api, 'API')
+      await newFork(panel, 'local')
+      // Deleting an earlier row shifts token's input ID to another variable.
+      for (const name of ['extra', 'token', 'tail']) {
+        await fill(panel, '#env-variable-name', name)
+        await click(panel, '#env-add-variable')
+        await expect(panel.locator('#env-variable-name')).toHaveValue('')
+      }
+      const token = panel.getByRole('textbox', {name: 'Value for token', exact: true})
+      if (operation === 'add') await fill(panel, '#env-variable-name', 'new-variable')
+      // Hold only the operation's storage acknowledgement; value edits queue behind it.
+      await panel.evaluate(() => {
+        const set = chrome.storage.local.set.bind(chrome.storage.local)
+        chrome.storage.local.set = (items, callback) => {
+          if (!Object.keys(items).some((key) => key.startsWith('browsercurl.collection.'))) return set(items, callback)
+          chrome.storage.local.set = set
+          set(items, () => { window.finishForkVariableSave = callback })
+        }
+      })
+      if (operation === 'add') await click(panel, '#env-add-variable')
+      else await panel.getByRole('button', {name: 'Delete extra', exact: true}).click()
+      await panel.waitForFunction(() => typeof window.finishForkVariableSave === 'function')
+      await token.fill('')
+      await panel.keyboard.type('prefix')
+      if (selection === 'selection') {
+        await panel.keyboard.press('ArrowLeft')
+        await panel.keyboard.press('ArrowLeft')
+        await panel.keyboard.press('Shift+ArrowLeft')
+        await panel.keyboard.press('Shift+ArrowLeft')
+      }
+      const caret = await token.evaluate((input) => [input.selectionStart, input.selectionEnd, input.selectionDirection])
+      await panel.evaluate(() => window.finishForkVariableSave())
+      await expect(panel.locator('#env-add-variable')).toBeEnabled()
+      if (operation === 'add') await expect(panel.getByRole('textbox', {name: 'Value for new-variable', exact: true})).toBeVisible()
+      else await expect(panel.getByRole('textbox', {name: 'Value for extra', exact: true})).toHaveCount(0)
+      const restoredCaret = await token.evaluate((input) => [input.selectionStart, input.selectionEnd, input.selectionDirection])
+
+      // Continue typing without using any locator action that could refocus token.
+      await panel.keyboard.type('suffix')
+      const expected = selection === 'caret' ? 'prefixsuffix' : 'prsuffixix'
+      await expect(token).toHaveValue(expected)
+      await expect(token).toBeFocused()
+      expect(restoredCaret).toEqual(caret)
+      await expect(panel.getByRole('textbox', {name: 'Value for tail', exact: true})).toHaveValue('')
+      await expect(panel.locator('#env-variable-name')).toHaveValue('')
+      await expect(panel.locator('#env-add-variable')).toBeEnabled()
+      await proof(panel, `env-fork-only-${operation}-typing-${selection}`)
+
+      await closeEnv(panel)
+      await panel.locator('#env-picker').selectOption('local')
+      await fill(panel, '#request-url', `${api.origin}/echo?token={{token}}`)
+      await send(panel)
+      expect((await echoedRequest(panel)).url).toBe(`/echo?token=${expected}`)
+      await openEnv(panel, 'API')
+      await panel.getByRole('tab', {name: 'local', exact: true}).click()
+      await expect(token).toHaveValue(expected)
+      await proof(panel, `env-fork-only-${operation}-saved-${selection}`)
+    })
+  }
+}
+
 test('a failed value save during fork rename keeps the unsaved text across renders for retry', async ({extension, api}) => {
   const panel = await extension.openPanel()
   await setup(panel, api, 'API')
