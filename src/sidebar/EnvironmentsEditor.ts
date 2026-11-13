@@ -18,6 +18,7 @@ export class EnvironmentsEditor {
   private tab: string | null = null
   private revision = 0
   private pending = 0
+  private completions: Array<{revision: number, run: () => void}> = []
   private renamingBase: string | null = null
   private renamingFork = false
   private confirmingDelete = false
@@ -92,6 +93,7 @@ export class EnvironmentsEditor {
       const updated = await editCollectionEnv(collection.id, change, this.levelId)
       if (revision !== this.revision) return
       this.collection = updated
+      this.completions.push({revision, run: done})
     } catch (error) {
       if (revision !== this.revision) return
       this.error.textContent = error instanceof Error ? error.message : 'Could not save environments. Try again.'
@@ -99,9 +101,15 @@ export class EnvironmentsEditor {
       return
     } finally {
       this.pending--
-      if (!this.pending) for (const button of this.section.querySelectorAll<HTMLButtonElement>('button:not(#env-close)')) button.disabled = false
+      if (!this.pending) {
+        for (const button of this.section.querySelectorAll<HTMLButtonElement>('button:not(#env-close)')) button.disabled = false
+        // A structural write can finish before value edits made while it was saving.
+        // Rebuild only once the saved collection includes every queued edit.
+        const completions = this.completions
+        this.completions = []
+        for (const completion of completions) if (completion.revision === this.revision) completion.run()
+      }
     }
-    done()
   }
 
   private button(label: string, run: () => void): HTMLButtonElement {
