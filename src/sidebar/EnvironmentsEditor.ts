@@ -84,22 +84,24 @@ export class EnvironmentsEditor {
     const revision = this.revision
     this.pending++
     this.error.hidden = true
-    // Disable only submit actions; live value fields keep their focus and undo history.
-    const buttons = this.section.querySelectorAll<HTMLButtonElement>('button[type="submit"]')
+    // Actions that rebuild the fields must wait for saved state to catch up.
+    // Live value fields keep their focus and undo history while saves are pending.
+    const buttons = this.section.querySelectorAll<HTMLButtonElement>('button:not(#env-close)')
     for (const button of buttons) button.disabled = true
     try {
       const updated = await editCollectionEnv(collection.id, change, this.levelId)
       if (revision !== this.revision) return
       this.collection = updated
-      done()
     } catch (error) {
       if (revision !== this.revision) return
       this.error.textContent = error instanceof Error ? error.message : 'Could not save environments. Try again.'
       this.error.hidden = false
+      return
     } finally {
       this.pending--
-      if (!this.pending) for (const button of this.section.querySelectorAll<HTMLButtonElement>('button[type="submit"]')) button.disabled = false
+      if (!this.pending) for (const button of this.section.querySelectorAll<HTMLButtonElement>('button:not(#env-close)')) button.disabled = false
     }
+    done()
   }
 
   private button(label: string, run: () => void): HTMLButtonElement {
@@ -107,7 +109,8 @@ export class EnvironmentsEditor {
     button.type = 'button'
     button.className = 'text-button'
     button.textContent = label
-    button.addEventListener('click', run)
+    button.disabled = this.pending > 0
+    button.addEventListener('click', () => { if (!this.pending) run() })
     return button
   }
 
@@ -141,7 +144,11 @@ export class EnvironmentsEditor {
     if (cancel) {
       row.append(this.button('Cancel', cancel))
       form.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); cancel() }
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          event.stopPropagation()
+          if (!this.pending) cancel()
+        }
       })
     }
     form.append(label, row)

@@ -58,6 +58,56 @@ async function setup(panel, api, level) {
   await openEnv(panel, level)
 }
 
+test('fork rename waits for pending value saves without replacing live values with stale text', async ({extension, api}) => {
+  const panel = await extension.openPanel()
+  await setup(panel, api, 'API')
+  await addBase(panel, 'token')
+  await newFork(panel, 'local')
+  const token = panel.getByRole('textbox', {name: 'Value for token', exact: true})
+  await token.fill('old')
+  await expect(panel.locator('#env-new-fork')).toBeEnabled()
+
+  // Hold the acknowledgement of one real collection write, without using a timed delay.
+  await panel.evaluate(() => {
+    const set = chrome.storage.local.set.bind(chrome.storage.local)
+    chrome.storage.local.set = (items, callback) => {
+      if (!Object.keys(items).some((key) => key.startsWith('browsercurl.collection.'))) return set(items, callback)
+      chrome.storage.local.set = set
+      set(items, () => { window.finishEnvValueSave = callback })
+    }
+  })
+  await token.fill('new-value')
+  await panel.waitForFunction(() => typeof window.finishEnvValueSave === 'function')
+  // A native click attempts the action even when it should be disabled during persistence.
+  await panel.locator('#env-rename-fork').evaluate((button) => button.click())
+  await expect(token).toHaveValue('new-value')
+  await expect(panel.locator('#env-rename-fork')).toBeDisabled()
+  await expect(panel.locator('#env-rename-fork-name')).toHaveCount(0)
+  await proof(panel, 'env-rename-pending-value-save')
+
+  // Live input remains usable, and the action waits for all queued value saves.
+  await token.fill('newest-value')
+  await panel.evaluate(() => window.finishEnvValueSave())
+  await expect(panel.locator('#env-rename-fork')).toBeEnabled()
+  await click(panel, '#env-rename-fork')
+  await expect(token).toHaveValue('newest-value')
+  await fill(panel, '#env-rename-fork-name', 'staging')
+  await click(panel, '#env-save-fork-name')
+  await expect(panel.getByRole('tab', {name: 'staging', exact: true})).toHaveAttribute('aria-selected', 'true')
+  await expect(token).toHaveValue('newest-value')
+  await proof(panel, 'env-renamed-after-value-save')
+  await token.press('End')
+  await token.pressSequentially('-edited')
+  await closeEnv(panel)
+  await panel.locator('#env-picker').selectOption('staging')
+  await fill(panel, '#request-url', `${api.origin}/echo?token={{token}}`)
+  await send(panel)
+  expect((await echoedRequest(panel)).url).toBe('/echo?token=newest-value-edited')
+  await openEnv(panel, 'API')
+  await panel.getByRole('tab', {name: 'staging', exact: true}).click()
+  await expect(token).toHaveValue('newest-value-edited')
+})
+
 for (const level of ['API', 'Folder', 'Request']) {
   test(`rename a base name at ${level}: forks keep the old value and gain the new name empty`, async ({extension, api}) => {
     const panel = await extension.openPanel()
