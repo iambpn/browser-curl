@@ -705,7 +705,7 @@ class SidebarApp {
   /** Read URL parameters while retaining disabled rows and unfinished entries. */
   private readUrlParameters = (): void => {
     if (isCurlCommand(this.url.value)) return
-    const {search} = editorUrlParts(this.url.value)
+    const {search} = editorUrlParts(this.url.value.trim())
     if (search === this.lastUrlSearch) return
     this.lastUrlSearch = search
     const retained: RequestEntry[] = []

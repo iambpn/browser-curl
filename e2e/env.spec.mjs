@@ -51,6 +51,20 @@ async function setupUrlEnv(panel, api, url) {
   await panel.locator('#env-picker').selectOption('local')
 }
 
+for (const linked of [false, true]) {
+  test(`URL outer whitespace is trimmed when syncing Params for ${linked ? 'collection' : 'unlinked'} requests`, async ({extension, api}) => {
+    const panel = await extension.openPanel()
+    if (linked) await setupUrlEnv(panel, api, '{{baseUrl}}/echo')
+    const baseUrl = linked ? '{{baseUrl}}' : api.origin
+    await fill(panel, '#request-url', `  ${baseUrl}/echo?foo=bar `)
+    await expect(panel.locator('#params-rows [data-field="key"]').first()).toHaveValue('foo')
+    await expect(panel.locator('#params-rows [data-field="value"]').first()).toHaveValue('bar')
+    await send(panel)
+    expect((await echoedRequest(panel)).url).toBe('/echo?foo=bar')
+    await capture(panel, `url-whitespace-${linked ? 'collection' : 'unlinked'}`)
+  })
+}
+
 test('query parameters supplied by a URL variable are sent alongside explicit Params', async ({extension, api}) => {
   const panel = await extension.openPanel()
   await setupUrlEnv(panel, api, '{{baseUrl}}')
