@@ -2,20 +2,24 @@
 import type {EditorState} from '../history/request-state'
 import type {RequestEntry} from '../requests/request-types'
 import {parse as parsePostmanUrl} from 'postman-url-encoder/parser/index.js'
+import {addBaseName, createEnv, createFork, setForkValue} from '../env/env.ts'
+import type {LevelEnv} from '../env/env'
 
-export interface ImportedRequest {editor: EditorState}
-export interface ImportedFolder {name: string; requests: ImportedItem[]}
+export interface ImportedRequest {editor: EditorState; env?: LevelEnv}
+export interface ImportedFolder {name: string; requests: ImportedItem[]; env?: LevelEnv}
 export type ImportedItem = ImportedRequest | ImportedFolder
 export interface ImportedCollection extends ImportedFolder {
   postmanId?: string
-  variables?: unknown[]
+  chosenEnv?: string | null
 }
 
 /** Export one collection. Keep a newly generated Postman ID on the input for the caller to persist. */
 export function exportPostmanCollection(collection: ImportedCollection): {json: string; fileName: string} {
   collection.postmanId ||= crypto.randomUUID()
+  const variables = (env?: LevelEnv): ObjectValue => env?.baseNames.length
+    ? {variable: env.baseNames.map((key) => ({key, value: ''}))} : {}
   const items = (children: ImportedItem[]): ObjectValue[] => children.map((item) => {
-    if ('requests' in item) return {name: item.name, item: items(item.requests)}
+    if ('requests' in item) return {name: item.name, ...variables(item.env), item: items(item.requests)}
     const editor = item.editor
     // The editor's blank rows are placeholders; sending also ignores keys with no text.
     const query = editor.params.filter(({key}) => key.trim()).map(({enabled, key, value}) => ({
@@ -36,7 +40,7 @@ export function exportPostmanCollection(collection: ImportedCollection): {json: 
     const address = url.raw.slice(0, url.raw.length - hash.length - queryLength)
     const search = query.filter(({disabled}) => !disabled).map(({key, value}) => `${key}=${value}`).join('&')
     const raw = address + (search ? `?${search}` : '') + hash
-    return {name: editor.name, request: {
+    return {name: editor.name, ...variables(item.env), request: {
       method: editor.method, url: {...url, raw, query,
         ...(url.auth ? {auth: {user: url.auth[0], password: url.auth[1]}} : {})}, header,
       body: {mode: 'raw', raw: editor.body, options: {raw: {language: editor.bodyType === 'json' ? 'json' : 'text'}}},
@@ -45,9 +49,8 @@ export function exportPostmanCollection(collection: ImportedCollection): {json: 
   })
   const output: ObjectValue = {
     info: {name: collection.name, _postman_id: collection.postmanId, schema: 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json'},
-    item: items(collection.requests)
+    ...variables(collection.env), item: items(collection.requests)
   }
-  if (collection.variables !== undefined) output.variable = collection.variables
   const name = collection.name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
   return {json: JSON.stringify(output, null, 2), fileName: `${name}.postman_collection.json`}
 }
@@ -94,6 +97,24 @@ function rows(value: unknown): RequestEntry[] {
     const row = object(entry)
     return {enabled: row.disabled !== true, key: text(row.key), value: text(row.value)}
   })
+}
+
+/** Shared by file import and migration of the collection variables kept by older versions. */
+export function importPostmanEnv(value: unknown, skipped: (key: string) => void = () => {}): LevelEnv {
+  const env = createEnv()
+  const values = new Map<string, string>()
+  for (const row of rows(value)) {
+    const name = row.key.trim()
+    if (!name || /[{}]/.test(name)) { skipped(row.key); continue }
+    if (!env.baseNames.includes(name)) addBaseName(env, name)
+    // Merge duplicates in first-name order; the last enabled nonempty value wins.
+    if (row.enabled && row.value !== '') values.set(name, row.value)
+  }
+  if (values.size) {
+    const fork = createFork(env, crypto.randomUUID(), 'imported')
+    for (const [name, value] of values) setForkValue(env, fork.id, name, value)
+  }
+  return env
 }
 
 /** Both schema versions also allow headers as newline-separated text. */
@@ -162,6 +183,12 @@ export function importPostmanCollection(fileText: string): {collection: Imported
     if (!dropped.has(kind)) dropped.set(kind, new Set())
     dropped.get(kind)!.add(name)
   }
+  let hasImportedFork = false
+  const readEnv = (value: unknown, path: string): LevelEnv => {
+    const env = importPostmanEnv(value, (key) => warn(`Invalid variable key ${JSON.stringify(key)} was skipped`, path))
+    if (env.forks.length) hasImportedFork = true
+    return env
+  }
   /** Group warnings by dropped feature, including all affected paths instead of repeating messages. */
   const warnDropped = (value: unknown, name: string): void => {
     if (Array.isArray(value)) { value.forEach((entry) => warnDropped(entry, name)); return }
@@ -207,7 +234,8 @@ export function importPostmanCollection(fileText: string): {collection: Imported
     if (typeof item.name !== 'string' || !item.name.trim()) throw new Error('Every Postman item needs a name.')
     const name = `${parent} / ${item.name}`
     warnDropped(item, name)
-    if (Array.isArray(item.item)) return {name: item.name, requests: readItems(item.item, item.auth ?? inheritedAuth, name)}
+    const env = readEnv(item.variable, name)
+    if (Array.isArray(item.item)) return {name: item.name, env, requests: readItems(item.item, item.auth ?? inheritedAuth, name)}
     if ('item' in item || (typeof item.request !== 'string' && (!item.request || typeof item.request !== 'object' || Array.isArray(item.request)))) {
       throw new Error(`Postman item “${item.name}” needs a request or a folder item list.`)
     }
@@ -232,11 +260,11 @@ export function importPostmanCollection(fileText: string): {collection: Imported
       editor.method = 'GET'
     }
     readAuth(request.auth ?? inheritedAuth, editor, name)
-    return {editor}
+    return {editor, env}
   })
   warnDropped(source, info.name)
-  const collection: ImportedCollection = {name: info.name, requests: readItems(source.item, source.auth, info.name)}
+  const collection: ImportedCollection = {name: info.name, env: readEnv(source.variable, info.name), requests: readItems(source.item, source.auth, info.name)}
+  collection.chosenEnv = hasImportedFork ? 'imported' : null
   if (typeof info._postman_id === 'string') collection.postmanId = info._postman_id
-  if (Array.isArray(source.variable)) collection.variables = source.variable
   return {collection, warnings: [...dropped].map(([kind, names]) => `${kind} for: ${[...names].join(', ')}.`)}
 }

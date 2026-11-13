@@ -38,7 +38,10 @@ async function importAndSend({extension, api}) {
   await capture(panel, 'postman-import-tree-and-warnings')
   const saved = await panel.evaluate(storedCollections)
   expect(saved.collections[0].postmanId).toBe('fixture-widget-api')
-  expect(saved.collections[0].variables).toEqual([{key: 'unused', value: '{{unchanged}}', type: 'string'}])
+  expect(saved.collections[0].variables).toBeUndefined()
+  expect(saved.collections[0].env.baseNames).toEqual(['unused'])
+  expect(saved.collections[0].env.forks[0].variables).toEqual([{name: 'unused', value: '{{unchanged}}'}])
+  expect(saved.collections[0].chosenEnv).toBe('imported')
   await click(panel, '#dismiss-collection-import')
   await expectHidden(panel, '#collection-import-notice')
   await panel.getByRole('button', {name: 'Collapse Imported Widget API', exact: true}).click()
@@ -72,6 +75,28 @@ async function importAndSend({extension, api}) {
   await expectValue(panel, '#auth-type', 'bearer')
   await expectValue(panel, '#bearer-token', 'folder-token')
   await capture(panel, 'postman-loaded-inherited-auth')
+  // The imported fork is chosen, but the file did not supply the name used by this request.
+  const count = api.requests.length
+  await click(panel, '#send-request')
+  await expect(panel.locator('#request-error')).toContainText('“name”')
+  await expect(panel.locator('#request-error')).toContainText('env “imported”')
+  expect(api.requests).toHaveLength(count)
+  await click(panel, '#show-collections')
+  await panel.locator('.collection-row').filter({has: panel.locator('[data-collection-name]')}).getByRole('button', {name: 'Environments', exact: true}).last().click()
+  await panel.locator('#env-base-name').fill('name')
+  await click(panel, '#env-add-name')
+  await expect(panel.locator('#env-base-name')).toHaveValue('')
+  await panel.locator('#env-fork-name').fill('local')
+  await click(panel, '#env-new-fork')
+  await panel.getByRole('textbox', {name: 'Value for name', exact: true}).fill('imported-widget')
+  await expect.poll(async () => {
+    const {collections} = await panel.evaluate(storedCollections)
+    return collections.some((collection) => collection.env.forks.some((fork) =>
+      fork.variables.some((variable) => variable.name === 'name' && variable.value === 'imported-widget')))
+  }).toBe(true)
+  await click(panel, '#env-close')
+  await click(panel, '#close-collections')
+  await panel.locator('#env-picker').selectOption('local')
   await send(panel)
   const received = await echoedRequest(panel)
   expect(received.method).toBe('POST')
@@ -80,8 +105,10 @@ async function importAndSend({extension, api}) {
   expect(received.headers['x-disabled']).toBeUndefined()
   expect(received.headers['content-type']).toBe('application/json')
   expect(received.headers.authorization).toBe('Bearer folder-token')
-  expect(received.body).toBe('{"widget":"{{name}}"}')
-  expect(await panel.evaluate(storedHistory)).toHaveLength(1)
+  expect(received.body).toBe('{"widget":"imported-widget"}')
+  const history = await panel.evaluate(storedHistory)
+  expect(history).toHaveLength(1)
+  expect(history[0].editor.body).toBe('{"widget":"{{name}}"}')
   await capture(panel, 'postman-sent-echo')
   await extension.restart()
   panel = await extension.openPanel()
@@ -92,7 +119,7 @@ async function importAndSend({extension, api}) {
   await click(panel, '#auth-tab')
   await expectValue(panel, '#bearer-token', 'collection-token')
 }
-test('imports a v2.1 file as a new expanded collection, shows warnings, and sends an inherited-auth request', importAndSend)
+test('imports a v2.1 file as a new expanded collection, shows warnings, and sends with inherited auth and a collection env', importAndSend)
 
 test('sends imported object URLs with decoded query rows and preserved empty path segments', async ({extension, api}) => {
   const panel = await extension.openPanel()
@@ -128,6 +155,25 @@ test('sends imported object URLs with decoded query rows and preserved empty pat
     await capture(panel, path === '/echo' ? 'postman-object-query-sent' : 'postman-empty-path-segment-sent')
     await click(panel, '#show-collections')
   }
+})
+
+test('imported raw URL references in disabled query rows do not block sending', async ({extension, api}) => {
+  const panel = await extension.openPanel()
+  const source = {
+    info: {name: 'Disabled query API', schema: 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json'},
+    item: [{name: 'Disabled reference', request: {method: 'GET', url: {
+      raw: `${api.origin}/echo?skip={{missing}}`, query: [{key: 'skip', value: '{{missing}}', disabled: true}]
+    }}}]
+  }
+  await click(panel, '#show-collections')
+  await chooseFile(panel, JSON.stringify(source))
+  await panel.locator('[data-open-collection-request]').click()
+  await expect(panel.locator('#request-url')).toHaveValue(`${api.origin}/echo?skip={{missing}}`)
+  await expect(panel.locator('#params-rows [data-field="enabled"]')).not.toBeChecked()
+  await send(panel)
+  expect((await echoedRequest(panel)).url).toBe('/echo')
+  await expect(panel.locator('#request-error')).toBeHidden()
+  await capture(panel, 'postman-disabled-query-reference-sent')
 })
 
 for (const [name, source, error] of [
