@@ -80,6 +80,15 @@ test('query strings introduced by URL values become params without resolving ins
   assert.deepEqual(editor.params, [])
 })
 
+test('missing names follow URL address, enabled query rows, fragment, then headers in first-use order', () => {
+  const editor = {...editorFixture(), url: 'https://example.com/{{path}}?q={{first}}&skip={{disabled}}#{{second}}/{{first}}',
+    params: [{enabled: true, key: 'q', value: '{{first}}'}, {enabled: false, key: 'skip', value: '{{disabled}}'}],
+    headers: [{enabled: true, key: '{{header}}', value: '{{second}}'}], authType: 'none'}
+  assert.deepEqual(resolveEditor([], null, editor), {missing: ['path', 'first', 'second', 'header']})
+  assert.deepEqual(resolveEditor([valuesEnv({path: 'echo', first: '', second: ''})], 'local', editor),
+    {missing: ['first', 'second', 'header']})
+})
+
 test('resolves URL, enabled parameter and header keys and values, and body without changing editor values', () => {
   const editor = {...editorFixture(), url: '{{ baseUrl }}/{{id}}',
     params: [{enabled: true, key: '{{key}}', value: '{{id}}'}, {enabled: false, key: '{{missing}}', value: '{{missing}}'}],

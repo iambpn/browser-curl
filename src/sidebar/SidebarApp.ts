@@ -859,7 +859,7 @@ class SidebarApp {
   /** Reflect enabled parameter rows in the URL without losing other URL parts. */
   private updateUrl(): void {
     if (isCurlCommand(this.url.value)) return
-    const {address, hash} = editorUrlParts(this.url.value)
+    const {address, hash} = editorUrlParts(this.url.value.trim())
     if (!address.trim()) return
     const query = this.readRows('params')
       .filter((entry) => entry.enabled && entry.key.trim())

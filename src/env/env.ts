@@ -90,15 +90,18 @@ export function resolveEditor(chain: readonly (LevelEnv | undefined)[], chosenEn
   // Params own the literal URL query, including disabled imported rows. Resolve it only through rows.
   const {address, search, hash} = editorUrlParts(editor.url)
   const resolvedAddress = replace(address)
-  const resolvedHash = replace(hash)
-  resolved.url = resolvedAddress + resolvedHash
-  for (const rows of [resolved.params, resolved.headers]) {
+  const resolveRows = (rows: EditorState['params']): void => {
     for (const row of rows) {
       if (!row.enabled) continue
       row.key = replace(row.key)
       row.value = replace(row.value)
     }
   }
+  // Query rows occur before the fragment in the URL; retain that first-use order.
+  resolveRows(resolved.params)
+  const resolvedHash = replace(hash)
+  resolved.url = resolvedAddress + resolvedHash
+  resolveRows(resolved.headers)
   // A URL value can supply its own query. Add those rows after replacement to preserve one-pass semantics.
   const introduced = editorUrlParts(resolvedAddress)
   const introducedParams = new URLSearchParams(introduced.search.replace(/\{\{[^{}]*\}\}/g, encodeURIComponent))

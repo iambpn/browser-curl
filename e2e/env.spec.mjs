@@ -52,6 +52,18 @@ async function setupUrlEnv(panel, api, url) {
 }
 
 for (const linked of [false, true]) {
+  test(`editing Params trims URL outer whitespace for ${linked ? 'collection' : 'unlinked'} requests`, async ({extension, api}) => {
+    const panel = await extension.openPanel()
+    if (linked) await setupUrlEnv(panel, api, '{{baseUrl}}/echo')
+    const baseUrl = linked ? '{{baseUrl}}' : api.origin
+    await fill(panel, '#request-url', `  ${baseUrl}/echo `)
+    await addEntry(panel, 'params', 'foo', 'bar')
+    await send(panel)
+    expect((await echoedRequest(panel)).url).toBe('/echo?foo=bar')
+    await expect(panel.locator('#request-url')).toHaveValue(`${baseUrl}/echo?foo=bar`)
+    await capture(panel, `params-url-whitespace-${linked ? 'collection' : 'unlinked'}`)
+  })
+
   test(`URL outer whitespace is trimmed when syncing Params for ${linked ? 'collection' : 'unlinked'} requests`, async ({extension, api}) => {
     const panel = await extension.openPanel()
     if (linked) await setupUrlEnv(panel, api, '{{baseUrl}}/echo')
@@ -64,6 +76,19 @@ for (const linked of [false, true]) {
     await capture(panel, `url-whitespace-${linked ? 'collection' : 'unlinked'}`)
   })
 }
+
+test('No env reports missing query names before fragment names and skips disabled Params', async ({extension, api}) => {
+  const panel = await extension.openPanel()
+  await setupUrlEnv(panel, api, `${api.origin}/echo?q={{first}}#{{second}}`)
+  await panel.locator('#env-picker').selectOption('')
+  await addEntry(panel, 'params', 'skip', '{{disabled}}', false)
+  await click(panel, '#send-request')
+  await expect(panel.locator('#request-error')).toHaveText('Missing variables: “first”, “second”; no env is chosen.')
+  await expect(panel.locator('#send-request')).toHaveText('Send')
+  expect(api.requests).toHaveLength(0)
+  expect(await panel.evaluate(storedHistory)).toHaveLength(0)
+  await capture(panel, 'env-query-before-fragment-missing')
+})
 
 test('query parameters supplied by a URL variable are sent alongside explicit Params', async ({extension, api}) => {
   const panel = await extension.openPanel()
