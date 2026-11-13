@@ -267,9 +267,19 @@ export class EnvironmentsEditor {
       if (this.renamingFork) {
         const form = this.nameForm('env-rename-fork-name', 'env-save-fork-name', 'Fork name', 'Save name', (name) => {
           void this.edit((env) => renameFork(env, fork.id, name), () => {
+            // The user may have moved into a value field while the rename saved.
+            const active = document.activeElement
+            const input = active instanceof HTMLInputElement && this.section.contains(active) ? active : null
+            const selection = input ? [input.selectionStart, input.selectionEnd, input.selectionDirection ?? undefined] as const : null
             this.renamingFork = false
             this.render()
-            element('#env-rename-fork').focus()
+            const restored = input && document.getElementById(input.id)
+            if (restored instanceof HTMLInputElement) {
+              restored.focus()
+              if (selection) restored.setSelectionRange(...selection)
+            } else {
+              element('#env-rename-fork').focus()
+            }
           })
         }, fork.name, () => { this.renamingFork = false; this.render(); element('#env-rename-fork').focus() })
         form.querySelector('input')!.setAttribute('list', 'env-fork-suggestions')

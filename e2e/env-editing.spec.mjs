@@ -108,58 +108,74 @@ test('fork rename waits for pending value saves without replacing live values wi
   await expect(token).toHaveValue('newest-value-edited')
 })
 
-test('editing a value while a fork rename is saving preserves the live value and subsequent edits', async ({extension, api}) => {
-  const panel = await extension.openPanel()
-  await setup(panel, api, 'API')
-  await addBase(panel, 'token')
-  await newFork(panel, 'local')
-  const token = panel.getByRole('textbox', {name: 'Value for token', exact: true})
-  await token.fill('old')
-  await click(panel, '#env-rename-fork')
-  await fill(panel, '#env-rename-fork-name', 'staging')
+for (const selection of ['caret', 'selection']) {
+  test(`typing through a fork rename save preserves value focus and ${selection}`, async ({extension, api}) => {
+    const panel = await extension.openPanel()
+    await setup(panel, api, 'API')
+    await addBase(panel, 'token')
+    await newFork(panel, 'local')
+    const token = panel.getByRole('textbox', {name: 'Value for token', exact: true})
+    await token.fill('old')
+    await click(panel, '#env-rename-fork')
+    await fill(panel, '#env-rename-fork-name', 'staging')
 
-  // Hold the rename acknowledgement, then the following value acknowledgement,
-  // so the test exercises both the in-flight field and the fully saved state.
-  await panel.evaluate(() => {
-    const set = chrome.storage.local.set.bind(chrome.storage.local)
-    window.envWriteCallbacks = []
-    chrome.storage.local.set = (items, callback) => {
-      if (!Object.keys(items).some((key) => key.startsWith('browsercurl.collection.'))) return set(items, callback)
-      set(items, () => window.envWriteCallbacks.push(callback))
+    // Hold the rename acknowledgement, then the following value acknowledgement,
+    // so the test exercises both the in-flight field and the fully saved state.
+    await panel.evaluate(() => {
+      const set = chrome.storage.local.set.bind(chrome.storage.local)
+      window.envWriteCallbacks = []
+      chrome.storage.local.set = (items, callback) => {
+        if (!Object.keys(items).some((key) => key.startsWith('browsercurl.collection.'))) return set(items, callback)
+        set(items, () => window.envWriteCallbacks.push(callback))
+      }
+      window.restoreEnvStorageSet = () => { chrome.storage.local.set = set }
+    })
+    await click(panel, '#env-save-fork-name')
+    await panel.waitForFunction(() => window.envWriteCallbacks.length === 1)
+    await token.fill('')
+    await panel.keyboard.type('prefix')
+    if (selection === 'selection') {
+      await panel.keyboard.press('ArrowLeft')
+      await panel.keyboard.press('ArrowLeft')
+      await panel.keyboard.press('Shift+ArrowLeft')
+      await panel.keyboard.press('Shift+ArrowLeft')
     }
-    window.restoreEnvStorageSet = () => { chrome.storage.local.set = set }
-  })
-  await click(panel, '#env-save-fork-name')
-  await panel.waitForFunction(() => window.envWriteCallbacks.length === 1)
-  await token.fill('new-value')
-  await proof(panel, 'env-value-edited-during-rename')
-  await panel.evaluate(() => window.envWriteCallbacks[0]())
-  await panel.waitForFunction(() => window.envWriteCallbacks.length === 2)
-  await expect(token).toHaveValue('new-value')
-  await expect(panel.locator('#env-rename-fork')).toBeDisabled()
-  await panel.evaluate(() => {
-    window.restoreEnvStorageSet()
-    window.envWriteCallbacks[1]()
-  })
-  await expect(panel.locator('#env-rename-fork')).toBeEnabled()
-  await expect(panel.getByRole('tab', {name: 'staging', exact: true})).toHaveAttribute('aria-selected', 'true')
-  await expect(token).toHaveValue('new-value')
-  expect((await panel.evaluate(storedCollections)).collections[0].env.forks[0].variables[0].value).toBe('new-value')
-  await proof(panel, 'env-rename-retains-new-value')
+    const caret = await token.evaluate((input) => [input.selectionStart, input.selectionEnd, input.selectionDirection])
+    await proof(panel, `env-value-edited-during-rename-${selection}`)
+    await panel.evaluate(() => window.envWriteCallbacks[0]())
+    await panel.waitForFunction(() => window.envWriteCallbacks.length === 2)
+    await expect(token).toHaveValue('prefix')
+    await expect(panel.locator('#env-rename-fork')).toBeDisabled()
+    await panel.evaluate(() => {
+      window.restoreEnvStorageSet()
+      window.envWriteCallbacks[1]()
+    })
+    await expect(panel.locator('#env-rename-fork')).toBeEnabled()
+    await expect(panel.getByRole('tab', {name: 'staging', exact: true})).toHaveAttribute('aria-selected', 'true')
+    await expect(token).toHaveValue('prefix')
+    await expect(token).toBeFocused()
+    expect(await token.evaluate((input) => [input.selectionStart, input.selectionEnd, input.selectionDirection])).toEqual(caret)
+    expect((await panel.evaluate(storedCollections)).collections[0].env.forks[0].variables[0].value).toBe('prefix')
+    await proof(panel, `env-rename-retains-new-value-${selection}`)
 
-  await token.press('End')
-  await token.pressSequentially('-edited')
-  await expect(panel.locator('#env-rename-fork')).toBeEnabled()
-  await closeEnv(panel)
-  await panel.locator('#env-picker').selectOption('staging')
-  await fill(panel, '#request-url', `${api.origin}/echo?token={{token}}`)
-  await send(panel)
-  expect((await echoedRequest(panel)).url).toBe('/echo?token=new-value-edited')
-  await openEnv(panel, 'API')
-  await panel.getByRole('tab', {name: 'staging', exact: true}).click()
-  await expect(token).toHaveValue('new-value-edited')
-  await proof(panel, 'env-rename-subsequent-edit-saved')
-})
+    // Keep typing through the keyboard without focusing the rebuilt field again.
+    await panel.keyboard.type('suffix')
+    const expected = selection === 'caret' ? 'prefixsuffix' : 'prsuffixix'
+    await expect(token).toHaveValue(expected)
+    await expect(token).toBeFocused()
+    await expect(panel.locator('#env-rename-fork')).toBeEnabled()
+    await proof(panel, `env-rename-typing-continues-${selection}`)
+    await closeEnv(panel)
+    await panel.locator('#env-picker').selectOption('staging')
+    await fill(panel, '#request-url', `${api.origin}/echo?token={{token}}`)
+    await send(panel)
+    expect((await echoedRequest(panel)).url).toBe(`/echo?token=${expected}`)
+    await openEnv(panel, 'API')
+    await panel.getByRole('tab', {name: 'staging', exact: true}).click()
+    await expect(token).toHaveValue(expected)
+    await proof(panel, `env-rename-subsequent-edit-saved-${selection}`)
+  })
+}
 
 test('a failed value save during fork rename keeps the unsaved text across renders for retry', async ({extension, api}) => {
   const panel = await extension.openPanel()
