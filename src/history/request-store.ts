@@ -5,7 +5,7 @@
  */
 import type {HttpResultMessage} from '../requests/http-messages'
 import {summarizeSavedRequest} from './request-state.ts'
-import type {HistorySummary, SavedRequest, WorkspaceState} from './request-state'
+import type {HistorySummary, SavedRequest, SentEditorState, WorkspaceState} from './request-state'
 import {readStorage, removeStorage, writeStorage} from '../shared/storage.ts'
 
 /** Prefix for the entry keys of sent requests. Use it to recognize entry changes in storage events. */
@@ -71,7 +71,13 @@ export async function listHistorySummaries(): Promise<HistorySummary[]> {
  * Save the full request before the background starts its network operation. Background use only.
  * When history has more than HISTORY_LIMIT requests, this deletes the oldest ones.
  */
-export function createSavedRequest(request: SavedRequest): Promise<void> {
+export function createSavedRequest(request: SavedRequest & {editor: SentEditorState}): Promise<void> {
+  // Keep provenance on the history entry, separate from reusable editor values and the sent payload.
+  // The HTTP runner already forwards the complete editor snapshot, so it needs no env behavior.
+  if (request.editor.collectionRequest) {
+    const {collectionRequest, ...editor} = request.editor
+    request = {...request, editor, collectionRequest}
+  }
   /** Add this request as a distinct send attempt, and remove the requests that no longer fit. */
   async function create(): Promise<void> {
     const index = await listHistorySummaries()

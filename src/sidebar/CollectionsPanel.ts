@@ -7,6 +7,7 @@ import type {Collection, CollectionFolder, CollectionItem} from '../collections/
 import type {CollectionRequestLink, EditorState} from '../history/request-state'
 import {resolveRequestName} from '../history/request-state'
 import {importPostmanCollection} from '../collections/postman-converter'
+import {EnvironmentsEditor} from './EnvironmentsEditor'
 
 /** Find a required control in the sidebar's static markup. */
 function element<T extends HTMLElement>(selector: string): T {
@@ -36,6 +37,7 @@ function isEmptyEditor(editor: EditorState): boolean {
 
 /** Coordinate collection dialogs with the editor through its existing snapshot interface. */
 export class CollectionsPanel {
+  private environments = new EnvironmentsEditor()
   private dialog = element<HTMLDialogElement>('#collections-dialog')
   private list = element('#collections-list')
   private empty = element('#collections-empty')
@@ -208,7 +210,10 @@ export class CollectionsPanel {
       row.append(this.action('Add folder', () => this.showCreate(collection.id, item.id === collection.id ? undefined : item.id)))
     }
     row.append(this.action('Rename', () => this.renameItem(collection.id, item.id, name, row, button)))
-    if (item.id === collection.id) row.append(this.action('Export', () => this.showExport(collection.id, name)))
+    if (item.id === collection.id) {
+      row.append(this.action('Environments', () => { void this.environments.open(collection.id) }))
+      row.append(this.action('Export', () => this.showExport(collection.id, name)))
+    }
     row.append(this.action('Delete', () => { void this.deleteItem({collectionId: collection.id, itemId: item.id, name}) }))
     node.append(row)
     if (!isRequest) {
