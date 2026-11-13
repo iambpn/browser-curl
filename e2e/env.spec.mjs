@@ -51,6 +51,38 @@ async function setupUrlEnv(panel, api, url) {
   await panel.locator('#env-picker').selectOption('local')
 }
 
+test('query parameters supplied by a URL variable are sent alongside explicit Params', async ({extension, api}) => {
+  const panel = await extension.openPanel()
+  await setupUrlEnv(panel, api, '{{baseUrl}}')
+  await openEnvs(panel)
+  await panel.getByRole('tab', {name: 'local', exact: true}).click()
+  await forkValue(panel, 'baseUrl', `${api.origin}/echo?foo=bar&foo=a%26b`)
+  await click(panel, '#env-close')
+  await click(panel, '#close-collections')
+  await send(panel)
+  expect((await echoedRequest(panel)).url).toBe('/echo?foo=bar&foo=a%26b')
+  await addEntry(panel, 'params', 'extra', '{{id}}')
+  await send(panel)
+  expect((await echoedRequest(panel)).url).toBe('/echo?foo=bar&foo=a%26b&extra=42')
+  const history = await panel.evaluate(storedHistory)
+  expect(history.find((entry) => entry.editor.url === '{{baseUrl}}?extra={{id}}').request.url)
+    .toBe(`${api.origin}/echo?foo=bar&foo=a%26b&extra=42`)
+  await expect(panel.locator('#request-url')).toHaveValue('{{baseUrl}}?extra={{id}}')
+  await capture(panel, 'env-url-value-query-sent')
+})
+
+test('Params entered before the URL survive entering the server address and send', async ({extension, api}) => {
+  const panel = await extension.openPanel()
+  await addEntry(panel, 'params', 'foo', 'bar')
+  await expect(panel.locator('#request-url')).toHaveValue('')
+  await fill(panel, '#request-url', `${api.origin}/echo`)
+  await expect(panel.locator('#params-rows [data-field="key"]').last()).toHaveValue('foo')
+  await expect(panel.locator('#params-rows [data-field="value"]').last()).toHaveValue('bar')
+  await send(panel)
+  expect((await echoedRequest(panel)).url).toBe('/echo?foo=bar')
+  await capture(panel, 'params-before-url-sent')
+})
+
 test('query parameters typed in a base URL template resolve and survive reopening', async ({extension, api}) => {
   const panel = await extension.openPanel()
   await setupUrlEnv(panel, api, '{{baseUrl}}/echo')

@@ -1,5 +1,6 @@
 /** Collection env data and edits. Callers supply IDs and persist changes; no browser APIs are used here. */
 import type {EditorState} from '../history/request-state'
+import {editorUrlParts, encodeEditorParameter} from '../requests/editor-url.ts'
 
 export interface EnvVariable {
   name: string
@@ -86,13 +87,26 @@ export function resolveEditor(chain: readonly (LevelEnv | undefined)[], chosenEn
     return reference
   })
   const resolved = structuredClone(editor)
-  resolved.url = replace(editor.url)
+  // Params own the literal URL query, including disabled imported rows. Resolve it only through rows.
+  const {address, search, hash} = editorUrlParts(editor.url)
+  const resolvedAddress = replace(address)
+  const resolvedHash = replace(hash)
+  resolved.url = resolvedAddress + resolvedHash
   for (const rows of [resolved.params, resolved.headers]) {
     for (const row of rows) {
       if (!row.enabled) continue
       row.key = replace(row.key)
       row.value = replace(row.value)
     }
+  }
+  // A URL value can supply its own query. Add those rows after replacement to preserve one-pass semantics.
+  const introduced = editorUrlParts(resolvedAddress)
+  const introducedParams = new URLSearchParams(introduced.search.replace(/\{\{[^{}]*\}\}/g, encodeURIComponent))
+  resolved.params.unshift(...Array.from(introducedParams, ([key, value]) => ({enabled: true, key, value})))
+  if (search) {
+    const query = resolved.params.filter((row) => row.enabled && row.key.trim())
+      .map((row) => `${encodeEditorParameter(row.key)}=${encodeEditorParameter(row.value)}`).join('&')
+    resolved.url = introduced.address + (query ? `?${query}` : '') + introduced.hash + resolvedHash
   }
   resolved.body = replace(editor.body)
   const authFields: Record<string, string[]> = {

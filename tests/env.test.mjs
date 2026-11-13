@@ -57,6 +57,29 @@ function valuesEnv(values, name = 'local') {
   return {baseNames: [], forks: [{id: name, name, variables: Object.entries(values).map(([name, value]) => ({name, value}))}]}
 }
 
+test('raw URL query mirrors do not resolve disabled rows or change missing-name order', () => {
+  const editor = {...editorFixture(), url: 'https://example.com/echo?skip={{missing}}&value={{second}}',
+    params: [{enabled: false, key: 'skip', value: '{{missing}}'}, {enabled: true, key: '{{first}}', value: '{{second}}'}],
+    authType: 'none'}
+  assert.deepEqual(resolveEditor([], null, editor), {missing: ['first', 'second']})
+  editor.params[1].enabled = false
+  const result = resolveEditor([], null, editor)
+  assert.ok(result.editor)
+  assert.deepEqual(result.editor.params, editor.params)
+  assert.equal(result.editor.url, 'https://example.com/echo')
+})
+
+test('query strings introduced by URL values become params without resolving inserted references again', () => {
+  const editor = {...editorFixture(), url: '{{fullUrl}}', params: [], authType: 'none'}
+  const result = resolveEditor([valuesEnv({fullUrl: 'https://example.com/echo?foo=bar&foo=a%26b&literal={{other}}'})], 'local', editor)
+  assert.deepEqual(result.editor.params, [
+    {enabled: true, key: 'foo', value: 'bar'},
+    {enabled: true, key: 'foo', value: 'a&b'},
+    {enabled: true, key: 'literal', value: '{{other}}'}
+  ])
+  assert.deepEqual(editor.params, [])
+})
+
 test('resolves URL, enabled parameter and header keys and values, and body without changing editor values', () => {
   const editor = {...editorFixture(), url: '{{ baseUrl }}/{{id}}',
     params: [{enabled: true, key: '{{key}}', value: '{{id}}'}, {enabled: false, key: '{{missing}}', value: '{{missing}}'}],

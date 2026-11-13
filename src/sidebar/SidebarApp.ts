@@ -2,6 +2,7 @@
 import {controlSavedRequest, sendThroughBackground} from '../requests/background-client'
 import type {CurlImport} from '../requests/curl-import'
 import {buildRequest} from '../requests/request'
+import {editorUrlParts, encodeEditorParameter} from '../requests/editor-url'
 import {formatResponse, formatSize} from '../responses/format-response'
 import type {RequestAuthorization, RequestDraft, RequestEntry} from '../requests/request-types'
 import {loadResponseHeight, saveResponseHeight} from '../responses/response-height'
@@ -36,31 +37,6 @@ const AUTH_FIELD_IDS = [
 /** Return true when pasted or entered text is a cURL command and not a URL. */
 function isCurlCommand(text: string): boolean {
   return CURL_COMMAND_PATTERN.test(text)
-}
-
-/** Split editor text without validating or normalizing an unresolved URL. Skip delimiters inside references. */
-function editorUrlParts(text: string): {address: string; search: string; hash: string} {
-  let query = -1
-  let fragment = text.length
-  for (const match of text.matchAll(/\{\{[^{}]*\}\}|[?#]/g)) {
-    if (match[0] === '#') {
-      fragment = match.index
-      break
-    }
-    if (match[0] === '?' && query < 0) query = match.index
-  }
-  return {
-    address: text.slice(0, query < 0 ? fragment : query),
-    search: query < 0 ? '' : text.slice(query, fragment),
-    hash: text.slice(fragment)
-  }
-}
-
-/** Encode literal query text while leaving variable references available to the resolver and editor. */
-function encodeEditorParameter(value: string): string {
-  return value.split(/(\{\{[^{}]*\}\})/g).map((part, index) =>
-    index % 2 ? part : new URLSearchParams([['', part]]).toString().slice(1)
-  ).join('')
 }
 
 /** Read the Authorization tab fields that store the given authorization. */
@@ -884,6 +860,7 @@ class SidebarApp {
   private updateUrl(): void {
     if (isCurlCommand(this.url.value)) return
     const {address, hash} = editorUrlParts(this.url.value)
+    if (!address.trim()) return
     const query = this.readRows('params')
       .filter((entry) => entry.enabled && entry.key.trim())
       .map((entry) => `${encodeEditorParameter(entry.key)}=${encodeEditorParameter(entry.value)}`)

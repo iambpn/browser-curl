@@ -154,6 +154,25 @@ test('sends imported object URLs with decoded query rows and preserved empty pat
   }
 })
 
+test('imported raw URL references in disabled query rows do not block sending', async ({extension, api}) => {
+  const panel = await extension.openPanel()
+  const source = {
+    info: {name: 'Disabled query API', schema: 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json'},
+    item: [{name: 'Disabled reference', request: {method: 'GET', url: {
+      raw: `${api.origin}/echo?skip={{missing}}`, query: [{key: 'skip', value: '{{missing}}', disabled: true}]
+    }}}]
+  }
+  await click(panel, '#show-collections')
+  await chooseFile(panel, JSON.stringify(source))
+  await panel.locator('[data-open-collection-request]').click()
+  await expect(panel.locator('#request-url')).toHaveValue(`${api.origin}/echo?skip={{missing}}`)
+  await expect(panel.locator('#params-rows [data-field="enabled"]')).not.toBeChecked()
+  await send(panel)
+  expect((await echoedRequest(panel)).url).toBe('/echo')
+  await expect(panel.locator('#request-error')).toBeHidden()
+  await capture(panel, 'postman-disabled-query-reference-sent')
+})
+
 for (const [name, source, error] of [
   ['invalid JSON', '{invalid', 'not valid JSON'],
   ['Postman v1', '{"name":"Old collection","requests":[]}', 'Postman Collection v2.0 or v2.1'],
