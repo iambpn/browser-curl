@@ -174,7 +174,14 @@ export class EnvironmentsEditor {
     if (this.pending) return
     this.renamingFork = false
     let deleted = false
-    void this.edit((env) => { deleted = deleteFork(env, forkId, confirmed) }, () => {
+    void this.edit((env) => {
+      // Failed saves leave drafts that need the same protection as stored values.
+      const fork = env.forks.find(({id}) => id === forkId)
+      const hasUnsavedValue = fork?.variables.some(({name}) =>
+        (this.unsavedValues.get(JSON.stringify([forkId, name]))?.value ?? '') !== '')
+      if (!confirmed && hasUnsavedValue) return
+      deleted = deleteFork(env, forkId, confirmed)
+    }, () => {
       this.confirmingDelete = !deleted
       if (deleted) this.tab = null
       this.render()

@@ -214,6 +214,51 @@ test('a failed value save during fork rename keeps the unsaved text across rende
   await proof(panel, 'env-rename-failed-value-retried')
 })
 
+test('deleting a fork after its first value save fails requires confirmation and Cancel preserves the draft', async ({extension, api}) => {
+  const panel = await extension.openPanel()
+  panel.on('dialog', () => { throw new Error('Env edits must never open browser dialogs') })
+  await setup(panel, api, 'API')
+  await addBase(panel, 'token')
+  await newFork(panel, 'local')
+  const token = panel.getByRole('textbox', {name: 'Value for token', exact: true})
+  await expect(token).toHaveValue('')
+
+  // Fail the first nonempty value write, leaving only the draft with a value.
+  await panel.evaluate(() => {
+    const set = chrome.storage.local.set.bind(chrome.storage.local)
+    chrome.storage.local.set = (items, callback) => {
+      if (!Object.keys(items).some((key) => key.startsWith('browsercurl.collection.'))) return set(items, callback)
+      chrome.storage.local.set = set
+      throw new Error('Storage quota exceeded')
+    }
+  })
+  await token.fill('unsaved-token')
+  await expect(panel.locator('#env-error')).toHaveText('Storage quota exceeded')
+  expect((await panel.evaluate(storedCollections)).collections[0].env.forks[0].variables[0].value).toBe('')
+  await proof(panel, 'env-delete-failed-save-draft')
+
+  await click(panel, '#env-delete-fork')
+  await expect(panel.locator('#env-delete-warning')).toContainText('local')
+  await expect(token).toHaveValue('unsaved-token')
+  await proof(panel, 'env-delete-unsaved-confirm')
+  await click(panel, '#env-cancel-delete')
+  await expect(panel.locator('#env-delete-warning')).toHaveCount(0)
+  await expect(panel.getByRole('tab', {name: 'local', exact: true})).toHaveAttribute('aria-selected', 'true')
+  await expect(token).toHaveValue('unsaved-token')
+  expect((await panel.evaluate(storedCollections)).collections[0].env.forks[0].variables[0].value).toBe('')
+  await proof(panel, 'env-delete-unsaved-cancelled')
+
+  // Cancel must retain the draft through later renders as well.
+  await panel.getByRole('tab', {name: 'Base', exact: true}).click()
+  await panel.getByRole('tab', {name: 'local', exact: true}).click()
+  await expect(token).toHaveValue('unsaved-token')
+  await click(panel, '#env-delete-fork')
+  await click(panel, '#env-confirm-delete')
+  await expect(panel.getByRole('tab', {name: 'local', exact: true})).toHaveCount(0)
+  expect((await panel.evaluate(storedCollections)).collections[0].env.forks).toEqual([])
+  await proof(panel, 'env-delete-unsaved-confirmed')
+})
+
 for (const level of ['API', 'Folder', 'Request']) {
   test(`rename a base name at ${level}: forks keep the old value and gain the new name empty`, async ({extension, api}) => {
     const panel = await extension.openPanel()
