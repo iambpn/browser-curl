@@ -37,6 +37,7 @@
           </div>
           <div class="workspace-actions">
             <span id="request-collection" class="draft-label" hidden></span>
+            <select id="env-picker" class="env-picker" aria-label="Collection env" hidden></select>
             <button id="back-to-draft" class="text-button" type="button" hidden>Back to draft</button>
             <span id="workspace-status" class="draft-label" role="status" data-running="false"><span class="running-spinner" aria-hidden="true"></span><span id="workspace-status-label">Draft</span></span>
           </div>
@@ -252,6 +253,23 @@
       </div>
       <p id="collections-empty" class="history-empty">No collections yet. Use New collection or Import above, or Save as to save a request in a collection.</p>
       <ul id="collections-list" class="history-list" aria-label="Collections"></ul>
+      <section id="env-editor" class="env-editor" aria-labelledby="env-title" hidden>
+        <div class="history-heading">
+          <div><h2 id="env-title">Environments</h2><p id="env-collection-name"></p></div>
+          <button id="env-close" class="text-button" type="button">Back to collections</button>
+        </div>
+        <p class="help-text">Base lists the names your requests need. Forks keep values on this device.</p>
+        <div id="env-tabs" class="env-tabs" role="tablist" aria-label="Environments"></div>
+        <p id="env-error" class="request-error" role="alert" hidden></p>
+        <div id="env-content" role="tabpanel"></div>
+        <form id="env-fork-form" class="env-form">
+          <label class="field-label" for="env-fork-name">Fork name</label>
+          <div class="env-input-row">
+            <input id="env-fork-name" class="auth-input" autocomplete="off" />
+            <button id="env-new-fork" class="history-button" type="submit">New fork</button>
+          </div>
+        </form>
+      </section>
     </dialog>
     <dialog id="save-as-dialog" class="history-dialog" aria-labelledby="save-as-title">
       <div class="history-heading"><div><h2 id="save-as-title">Save request as</h2><p>Keep every editor value in a collection on this device.</p></div></div>

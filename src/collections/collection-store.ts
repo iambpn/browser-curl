@@ -3,6 +3,8 @@ import type {CollectionRequestLink, EditorState} from '../history/request-state'
 import {readStorage, removeStorage, writeStorage} from '../shared/storage'
 import type {ImportedCollection, ImportedItem} from './postman-converter'
 import {exportPostmanCollection} from './postman-converter'
+import {createEnv, pickerOptions} from '../env/env'
+import type {LevelEnv} from '../env/env'
 
 /** One entry in the collection index, in creation order. */
 export interface CollectionSummary {
@@ -28,6 +30,8 @@ export type CollectionItem = CollectionRequest | CollectionFolder
 /** The existing requests field now holds ordered requests and folders, preserving saved flat collections. */
 export interface Collection extends CollectionSummary {
   requests: CollectionItem[]
+  env?: LevelEnv
+  chosenEnv?: string | null
   postmanId?: string
   variables?: unknown[]
 }
@@ -42,7 +46,7 @@ export function saveImportedCollection(imported: ImportedCollection): Promise<st
     const identify = (item: ImportedItem): CollectionItem => 'editor' in item
       ? {id: crypto.randomUUID(), editor: item.editor}
       : {id: crypto.randomUUID(), name: item.name, requests: item.requests.map(identify)}
-    const collection: Collection = {...snapshot, id: crypto.randomUUID(), requests: snapshot.requests.map(identify)}
+    const collection: Collection = {...snapshot, id: crypto.randomUUID(), requests: snapshot.requests.map(identify), env: createEnv(), chosenEnv: null}
     const index = await listCollections()
     index.push({id: collection.id, name: collection.name})
     await writeStorage({[COLLECTION_KEY_PREFIX + collection.id]: collection, [COLLECTION_INDEX_KEY]: index})
@@ -95,7 +99,7 @@ export function addCollectionRequest(
     }
     const name = destination.name.trim()
     if (!name) throw new Error('Enter a collection name.')
-    const collection: Collection = {id: crypto.randomUUID(), name, requests: [request]}
+    const collection: Collection = {id: crypto.randomUUID(), name, requests: [request], env: createEnv(), chosenEnv: null}
     const index = await listCollections()
     index.push({id: collection.id, name})
     await writeStorage({[COLLECTION_KEY_PREFIX + collection.id]: collection, [COLLECTION_INDEX_KEY]: index})
@@ -150,10 +154,33 @@ export function createCollection(name: string): Promise<void> {
   return navigator.locks.request(COLLECTION_INDEX_KEY, async () => {
     name = name.trim()
     if (!name) throw new Error('Enter a collection name.')
-    const collection: Collection = {id: crypto.randomUUID(), name, requests: []}
+    const collection: Collection = {id: crypto.randomUUID(), name, requests: [], env: createEnv(), chosenEnv: null}
     const index = await listCollections()
     index.push({id: collection.id, name})
     await writeStorage({[COLLECTION_KEY_PREFIX + collection.id]: collection, [COLLECTION_INDEX_KEY]: index})
+  })
+}
+
+/** Apply env edits to the latest saved collection under the same lock as all collection writes. */
+export function editCollectionEnv(id: string, edit: (env: LevelEnv) => void): Promise<Collection> {
+  return navigator.locks.request(COLLECTION_INDEX_KEY, async () => {
+    const collection = await loadCollection(id)
+    if (!collection) throw new Error('This collection is no longer available.')
+    collection.env ??= createEnv()
+    edit(collection.env)
+    await writeStorage({[COLLECTION_KEY_PREFIX + id]: collection})
+    return collection
+  })
+}
+
+/** Persist the picker selection independently of the current request's editor snapshot. */
+export function chooseCollectionEnv(id: string, name: string | null): Promise<void> {
+  return navigator.locks.request(COLLECTION_INDEX_KEY, async () => {
+    const collection = await loadCollection(id)
+    if (!collection) throw new Error('This collection is no longer available.')
+    if (!pickerOptions([collection.env]).some((option) => option.name === name)) throw new Error('This env is no longer available.')
+    collection.chosenEnv = name
+    await writeStorage({[COLLECTION_KEY_PREFIX + id]: collection})
   })
 }
 

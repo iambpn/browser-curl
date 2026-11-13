@@ -11,7 +11,8 @@ import {
   HISTORY_INDEX_KEY, HISTORY_KEY_PREFIX, listHistorySummaries, loadSavedRequest, loadWorkspace, saveWorkspace
 } from '../history/request-store'
 import {CollectionsPanel} from './CollectionsPanel'
-import {COLLECTION_KEY_PREFIX, loadCollection} from '../collections/collection-store'
+import {COLLECTION_INDEX_KEY, COLLECTION_KEY_PREFIX, chooseCollectionEnv, findCollectionRequest, loadCollection} from '../collections/collection-store'
+import {pickerOptions, resolveEditor} from '../env/env'
 import {resolveRequestName} from '../history/request-state'
 import type {CollectionRequestLink, EditorState, HistorySummary, PanelSnapshot, SavedRequest} from '../history/request-state'
 
@@ -166,6 +167,8 @@ class SidebarApp {
   private draftSaveTimer: ReturnType<typeof setTimeout> | undefined
   private draftBeforeHistory: PanelSnapshot | undefined
   private collectionRequest: CollectionRequestLink | undefined
+  private historySource: CollectionRequestLink | undefined
+  private preparingSend = false
   private editorRevision = 0
   private collectionHeadingRevision = 0
   private responseId: string | undefined
@@ -251,6 +254,7 @@ class SidebarApp {
       () => this.readEditorState(), this.openCollectionRequest,
       () => this.collectionRequest, this.linkCollectionRequest, () => this.editorRevision
     )
+    element<HTMLSelectElement>('#env-picker').addEventListener('change', this.chooseEnv)
     void this.restoreWorkspace()
   }
 
@@ -265,6 +269,7 @@ class SidebarApp {
         const snapshot = workspace.preview ?? workspace.draft
         this.applyEditorState(snapshot.editor)
         this.collectionRequest = snapshot.collectionRequest
+        this.historySource = snapshot.historySource
         void this.updateCollectionHeading()
         this.responseId = snapshot.responseId
         await this.restoreResponse()
@@ -284,7 +289,10 @@ class SidebarApp {
 
   /** Read the current editor and the response reference without copying response bodies into the draft. */
   private readPanelSnapshot(): PanelSnapshot {
-    return {editor: this.readEditorState(), responseId: this.responseId, collectionRequest: this.collectionRequest}
+    return {
+      editor: this.readEditorState(), responseId: this.responseId,
+      collectionRequest: this.collectionRequest, historySource: this.historySource
+    }
   }
 
   /** Save the editor now and cancel a pending delayed save. Background request completion stores responses separately. */
@@ -503,6 +511,7 @@ class SidebarApp {
       if (!saved) return
       if (!this.draftBeforeHistory) this.draftBeforeHistory = this.readPanelSnapshot()
       this.collectionRequest = undefined
+      this.historySource = saved.collectionRequest
       void this.updateCollectionHeading()
       this.hideImportNotice()
       this.resetResponse()
@@ -526,6 +535,7 @@ class SidebarApp {
     this.resetResponse()
     this.applyEditorState(editor)
     this.collectionRequest = link
+    this.historySource = undefined
     void this.updateCollectionHeading()
     this.updateWorkspaceLabel()
     this.persistWorkspace()
@@ -534,6 +544,7 @@ class SidebarApp {
   /** Save as changes the destination and, unless edited during the save, the request name. */
   private linkCollectionRequest = (link: CollectionRequestLink, name?: string): void => {
     this.collectionRequest = link
+    this.historySource = undefined
     if (name !== undefined) this.requestName = name
     this.updateRequestName()
     void this.updateCollectionHeading()
@@ -544,17 +555,38 @@ class SidebarApp {
   private async updateCollectionHeading(): Promise<void> {
     const revision = ++this.collectionHeadingRevision
     const heading = element('#request-collection')
+    const picker = element<HTMLSelectElement>('#env-picker')
     heading.hidden = true
+    picker.hidden = true
     const link = this.collectionRequest
     if (!link) return
     try {
       const collection = await loadCollection(link.collectionId)
       if (revision !== this.collectionHeadingRevision || this.disposed) return
-      heading.textContent = collection?.name ?? ''
+      if (!collection || !findCollectionRequest(collection, link.requestId)) return
+      heading.textContent = collection.name
       heading.title = collection?.name ?? ''
       heading.hidden = !collection
+      picker.replaceChildren(...pickerOptions([collection.env]).map(({name, label}) => new Option(label, name ?? '')))
+      picker.value = collection.chosenEnv ?? ''
+      picker.hidden = false
     } catch {
       // Keep the editor usable when the collection name cannot be read; Save reports storage failures.
+    }
+  }
+
+  private chooseEnv = async (): Promise<void> => {
+    const link = this.collectionRequest
+    const picker = element<HTMLSelectElement>('#env-picker')
+    if (!link) return
+    picker.disabled = true
+    try {
+      await chooseCollectionEnv(link.collectionId, picker.value || null)
+    } catch (error) {
+      this.showError(error instanceof Error ? error.message : 'Could not save the chosen env.')
+    } finally {
+      picker.disabled = false
+      void this.updateCollectionHeading()
     }
   }
 
@@ -566,6 +598,7 @@ class SidebarApp {
     this.hideImportNotice()
     this.applyEditorState(draft.editor)
     this.collectionRequest = draft.collectionRequest
+    this.historySource = draft.historySource
     void this.updateCollectionHeading()
     this.responseId = draft.responseId
     try {
@@ -582,6 +615,7 @@ class SidebarApp {
     this.canPersistWorkspace = true
     this.draftBeforeHistory = undefined
     this.collectionRequest = undefined
+    this.historySource = undefined
     void this.updateCollectionHeading()
     this.responseId = undefined
     this.hideImportNotice()
@@ -998,27 +1032,28 @@ class SidebarApp {
   }
 
   /** Read only credentials for the selected authorization type. */
-  private readAuthorization(): RequestAuthorization {
-    switch (this.authType.value) {
+  private readAuthorization(editor: EditorState): RequestAuthorization {
+    const values = editor.authValues
+    switch (editor.authType) {
       case 'bearer':
-        return {type: 'bearer', token: element<HTMLInputElement>('#bearer-token').value}
+        return {type: 'bearer', token: values['bearer-token'] ?? ''}
       case 'basic':
         return {
           type: 'basic',
-          username: element<HTMLInputElement>('#basic-username').value,
-          password: element<HTMLInputElement>('#basic-password').value
+          username: values['basic-username'] ?? '',
+          password: values['basic-password'] ?? ''
         }
       case 'api-key': {
-        const location = element<HTMLSelectElement>('#api-key-location').value
+        const location = values['api-key-location']
         return {
           type: 'api-key',
-          key: element<HTMLInputElement>('#api-key-name').value,
-          value: element<HTMLInputElement>('#api-key-value').value,
+          key: values['api-key-name'] ?? '',
+          value: values['api-key-value'] ?? '',
           location: location === 'query' ? 'query' : 'header'
         }
       }
       case 'custom':
-        return {type: 'custom', value: element<HTMLInputElement>('#custom-authorization').value}
+        return {type: 'custom', value: values['custom-authorization'] ?? ''}
       default:
         return {type: 'none'}
     }
@@ -1123,6 +1158,7 @@ class SidebarApp {
   /** Send or cancel a request. A cURL command in the URL field is imported instead of sent. */
   private sendRequest = async (event: SubmitEvent): Promise<void> => {
     event.preventDefault()
+    if (this.preparingSend) return
     if (this.runningId) {
       await this.cancelRunningRequest()
       return
@@ -1134,28 +1170,46 @@ class SidebarApp {
     this.error.hidden = true
     this.hideImportNotice()
     let id: string | undefined
+    this.preparingSend = true
+    this.send.disabled = true
+    this.send.textContent = 'Preparing…'
     try {
+      const editor = this.readEditorState()
+      const link = this.collectionRequest ?? this.historySource
+      let resolved = editor
+      let existingLink: CollectionRequestLink | undefined
+      if (link) {
+        // Wait for pending env edits and picker writes before taking the send's collection snapshot.
+        const collection = await navigator.locks.request(COLLECTION_INDEX_KEY, () => loadCollection(link.collectionId))
+        if (collection && findCollectionRequest(collection, link.requestId)) {
+          existingLink = link
+          const result = resolveEditor([collection.env], collection.chosenEnv ?? null, editor)
+          if (result.missing) {
+            const names = result.missing.map((name) => `“${name}”`).join(', ')
+            const context = collection.chosenEnv ? `env “${collection.chosenEnv}”` : 'no env is chosen'
+            throw new Error(`Missing variables: ${names}; ${context}.`)
+          }
+          resolved = result.editor
+        }
+      }
+      if (this.disposed) return
       const draft: RequestDraft = {
-        method: this.method.value,
-        url: this.url.value,
-        params: this.readRows('params'),
-        headers: this.readRows('headers'),
-        body: this.body.value,
-        bodyType: this.bodyType.value,
-        authorization: this.readAuthorization()
+        ...resolved,
+        authorization: this.readAuthorization(resolved)
       }
       const request = buildRequest(draft)
       const payload = toPayload(request)
-      const editor = this.readEditorState()
       id = crypto.randomUUID()
       this.sentRequestIds.add(id)
       this.resetResponse()
       this.responseId = id
       this.runningId = id
+      this.send.disabled = false
       this.setLoading(true)
       this.updateWorkspaceLabel()
       this.persistWorkspace()
-      const result = await sendThroughBackground(payload, editor, id)
+      this.preparingSend = false
+      const result = await sendThroughBackground(payload, existingLink ? {...editor, collectionRequest: existingLink} : editor, id)
       if (this.disposed || this.responseId !== id) return
       this.showResult(result)
     } catch (error) {
@@ -1167,6 +1221,11 @@ class SidebarApp {
       this.emptyTitle.textContent = 'No response received'
       this.emptyDescription.textContent = 'Check the request details and try again.'
     } finally {
+      if (!id) {
+        this.preparingSend = false
+        this.send.disabled = false
+        this.send.textContent = 'Send'
+      }
       if (id && this.responseId === id) {
         this.runningId = undefined
         this.setLoading(false)

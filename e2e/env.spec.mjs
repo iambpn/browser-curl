@@ -1,0 +1,215 @@
+/** Collection envs through the real editor, storage, history and local HTTP server. */
+import {appendFile, writeFile} from 'node:fs/promises'
+import {test, expect} from './fixtures.mjs'
+import {addEntry, click, fill, send, echoedRequest, savedWorkspaceWith, storedCollections, storedHistory} from './panel-helpers.mjs'
+
+async function capture(panel, name) {
+  if (process.env.FACTORY_EVIDENCE !== '1') return
+  await panel.screenshot({path: `.factory-evidence/${name}.png`})
+  await appendFile('.factory-evidence/env-captures.jsonl', JSON.stringify({name, video: await panel.video().path()}) + '\n')
+}
+
+async function openEnvs(panel) {
+  await click(panel, '#show-collections')
+  await panel.getByRole('button', {name: 'Environments', exact: true}).click()
+  await expect(panel.locator('#env-editor')).toBeVisible()
+}
+
+async function addName(panel, name) {
+  await fill(panel, '#env-base-name', name)
+  await click(panel, '#env-add-name')
+  await expect(panel.locator('#env-base-name')).toHaveValue('')
+}
+
+async function forkValue(panel, name, value) {
+  const input = panel.getByRole('textbox', {name: `Value for ${name}`, exact: true})
+  await input.fill(value)
+  // Values must persist while this input still has focus, including before a restart.
+  await expect.poll(async () => {
+    const {collections} = await panel.evaluate(storedCollections)
+    return collections[0].env.forks.some((fork) => fork.variables.some((variable) => variable.name === name && variable.value === value))
+  }).toBe(true)
+}
+
+test('collection envs resolve current values, block missing variables, persist and resend history safely', async ({extension, api}) => {
+  let panel = await extension.openPanel()
+  await fill(panel, '#request-url', '{{baseUrl}}/echo')
+  await panel.locator('#request-method').selectOption('POST')
+  await addEntry(panel, 'params', '{{token}}', '{{token}}')
+  await addEntry(panel, 'params', '{{disabled}}', '{{disabled}}', false)
+  await addEntry(panel, 'headers', 'X-Token', '{{token}}')
+  await addEntry(panel, 'headers', 'X-Skip', '{{disabled}}', false)
+  await click(panel, '#body-tab')
+  await fill(panel, '#request-body', '{"token":"{{token}}"}')
+  await click(panel, '#auth-tab')
+  await panel.locator('#auth-type').selectOption('bearer')
+  await fill(panel, '#bearer-token', '{{token}}')
+  await click(panel, '#save-as')
+  await fill(panel, '#save-request-name', 'Env request')
+  await fill(panel, '#new-collection-name', 'Env API')
+  await click(panel, '#confirm-save-as')
+  await expect(panel.locator('#save-as-dialog')).toBeHidden()
+  await expect(panel.locator('#env-picker')).toHaveValue('')
+  await openEnvs(panel)
+  await fill(panel, '#env-base-name', 'bad{name}')
+  await click(panel, '#env-add-name')
+  await expect(panel.locator('#env-error')).toHaveText('Variable names cannot contain { or }.')
+  await capture(panel, 'env-invalid-variable-name')
+  await addName(panel, 'baseUrl')
+  await addName(panel, 'token')
+  for (const name of ['local', 'staging']) {
+    await fill(panel, '#env-fork-name', name)
+    await click(panel, '#env-new-fork')
+    await expect(panel.getByRole('tab', {name, exact: true})).toHaveAttribute('aria-selected', 'true')
+    await forkValue(panel, 'baseUrl', `${api.origin}/${name}`)
+    await forkValue(panel, 'token', `${name}-token`)
+  }
+  await fill(panel, '#env-fork-name', ' local ')
+  await click(panel, '#env-new-fork')
+  await expect(panel.locator('#env-error')).toHaveText('This fork name already exists.')
+  await capture(panel, 'env-duplicate-fork-name')
+  await fill(panel, '#env-fork-name', '')
+  await panel.getByRole('tab', {name: 'Base', exact: true}).click()
+  await capture(panel, 'env-base-two-forks')
+  await panel.emulateMedia({colorScheme: 'dark'})
+  await panel.setViewportSize({width: 380, height: 820})
+  await capture(panel, 'env-base-dark')
+  expect(await panel.locator('#collections-dialog').evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true)
+  await click(panel, '#env-close')
+  await click(panel, '#close-collections')
+
+  for (const name of ['local', 'staging']) {
+    await panel.locator('#env-picker').selectOption(name)
+    await send(panel)
+    const received = await echoedRequest(panel)
+    expect(received.url).toBe(`/${name}/echo?${name}-token=${name}-token`)
+    expect(received.headers.authorization).toBe(`Bearer ${name}-token`)
+    expect(received.headers['x-token']).toBe(`${name}-token`)
+    expect(received.headers['x-skip']).toBeUndefined()
+    expect(received.body).toBe(`{"token":"${name}-token"}`)
+    await expect(panel.locator('#request-url')).toHaveValue('{{baseUrl}}/echo')
+    await capture(panel, `env-${name}-sent`)
+  }
+  const history = await panel.evaluate(storedHistory)
+  const {collections: [collection]} = await panel.evaluate(storedCollections)
+  expect(history).toHaveLength(2)
+  for (const saved of history) {
+    expect(saved.editor.url).toBe('{{baseUrl}}/echo')
+    expect(saved.request.url).toMatch(new RegExp(`${api.origin}/(local|staging)/echo`))
+    expect(saved.collectionRequest).toEqual({collectionId: collection.id, requestId: collection.requests[0].id})
+  }
+  if (process.env.FACTORY_EVIDENCE === '1') {
+    await writeFile('.factory-evidence/env-history.json', JSON.stringify(history, null, 2) + '\n')
+  }
+
+  await openEnvs(panel)
+  await addName(panel, 'fresh')
+  for (const name of ['local', 'staging']) {
+    await panel.getByRole('tab', {name, exact: true}).click()
+    await expect(panel.getByRole('textbox', {name: 'Value for fresh', exact: true})).toHaveValue('')
+  }
+  await capture(panel, 'env-new-name-empty')
+  await click(panel, '#env-close')
+  await click(panel, '#close-collections')
+  // This header is deliberately unsaved: resolution must use the current editor.
+  await addEntry(panel, 'headers', 'X-Fresh', '{{fresh}}')
+  const count = api.requests.length
+  await click(panel, '#send-request')
+  await expect(panel.locator('#request-error')).toContainText('fresh')
+  await expect(panel.locator('#request-error')).toContainText('staging')
+  expect(api.requests).toHaveLength(count)
+  await capture(panel, 'env-missing-blocked')
+  await openEnvs(panel)
+  await panel.getByRole('tab', {name: 'staging', exact: true}).click()
+  await forkValue(panel, 'fresh', 'kept-value')
+  await panel.getByRole('tab', {name: 'Base', exact: true}).click()
+  await panel.getByRole('button', {name: 'Remove fresh', exact: true}).click()
+  await expect(panel.getByRole('button', {name: 'Remove fresh', exact: true})).toHaveCount(0)
+  await capture(panel, 'env-base-name-removed')
+  await panel.getByRole('tab', {name: 'staging', exact: true}).click()
+  await expect(panel.getByRole('textbox', {name: 'Value for fresh', exact: true})).toHaveValue('kept-value')
+  await capture(panel, 'env-removed-name-keeps-value')
+  await click(panel, '#env-close')
+  await click(panel, '#close-collections')
+  await send(panel)
+  expect((await echoedRequest(panel)).headers['x-fresh']).toBe('kept-value')
+  await panel.locator('#env-picker').selectOption('')
+  await click(panel, '#send-request')
+  await expect(panel.locator('#request-error')).toContainText('baseUrl')
+  await expect(panel.locator('#request-error')).toContainText('no env is chosen')
+  await capture(panel, 'env-none-blocked')
+  await panel.locator('#env-picker').selectOption('local')
+  await expect.poll(async () => (await panel.evaluate(storedCollections)).collections[0].chosenEnv).toBe('local')
+  await extension.restart()
+  panel = await extension.openPanel()
+  await expect(panel.locator('#env-picker')).toHaveValue('local')
+  await capture(panel, 'env-restarted-selection')
+  await openEnvs(panel)
+  await panel.getByRole('tab', {name: 'local', exact: true}).click()
+  await expect(panel.getByRole('textbox', {name: 'Value for token', exact: true})).toHaveValue('local-token')
+  await capture(panel, 'env-restarted-values')
+  await click(panel, '#env-close')
+  await click(panel, '#close-collections')
+  await click(panel, '#show-history')
+  // First two sends have no fresh header. Their templates must resolve using today's chosen env.
+  await panel.locator('[data-open-history]').last().click()
+  await expect(panel.locator('#request-url')).toHaveValue('{{baseUrl}}/echo')
+  await expect(panel.locator('#env-picker')).toBeHidden()
+  await click(panel, '#body-tab')
+  await fill(panel, '#request-body', '{"history":"{{token}}"}')
+  await savedWorkspaceWith(panel, 'body', '{"history":"{{token}}"}')
+  await extension.restart()
+  panel = await extension.openPanel()
+  await send(panel)
+  expect((await echoedRequest(panel)).body).toBe('{"history":"local-token"}')
+  expect((await echoedRequest(panel)).url).toBe('/local/echo?local-token=local-token')
+  await capture(panel, 'env-history-resolved')
+  expect((await panel.evaluate(storedCollections)).collections[0].requests[0].editor).toEqual(collection.requests[0].editor)
+  // Save in a history preview must ask for a destination rather than overwrite its original request.
+  await click(panel, '#save-request')
+  await expect(panel.locator('#save-as-dialog')).toBeVisible()
+})
+
+test('unlinked requests send variable text literally', async ({extension, api}) => {
+  const panel = await extension.openPanel()
+  await fill(panel, '#request-url', `${api.origin}/echo/{{name}}`)
+  await expect(panel.locator('#env-picker')).toBeHidden()
+  await send(panel)
+  expect(decodeURIComponent((await echoedRequest(panel)).url)).toBe('/echo/{{name}}')
+  await capture(panel, 'env-unlinked-literal')
+})
+
+test('a deleted collection request stops resolving even when reopened from linked history', async ({extension, api}) => {
+  const panel = await extension.openPanel()
+  await fill(panel, '#request-url', `${api.origin}/echo/{{name}}`)
+  await click(panel, '#save-as')
+  await fill(panel, '#save-request-name', 'Temporary request')
+  await fill(panel, '#new-collection-name', 'Temporary API')
+  await click(panel, '#confirm-save-as')
+  await expect(panel.locator('#save-as-dialog')).toBeHidden()
+  await openEnvs(panel)
+  await addName(panel, 'name')
+  await fill(panel, '#env-fork-name', 'local')
+  await click(panel, '#env-new-fork')
+  await expect(panel.getByRole('tab', {name: 'local', exact: true})).toHaveAttribute('aria-selected', 'true')
+  await forkValue(panel, 'name', 'replaced')
+  await click(panel, '#env-close')
+  await click(panel, '#close-collections')
+  await panel.locator('#env-picker').selectOption('local')
+  await send(panel)
+  expect((await echoedRequest(panel)).url).toBe('/echo/replaced')
+  await click(panel, '#show-collections')
+  await panel.locator('[data-open-collection-request]').locator('..').getByRole('button', {name: 'Delete', exact: true}).click()
+  await expect(panel.locator('[data-open-collection-request]')).toHaveCount(0)
+  await click(panel, '#close-collections')
+  await expect(panel.locator('#env-picker')).toBeHidden()
+  await send(panel)
+  expect(decodeURIComponent((await echoedRequest(panel)).url)).toBe('/echo/{{name}}')
+  await click(panel, '#show-history')
+  // Open the original linked send, after the saved request was deleted.
+  await panel.locator('[data-open-history]').last().click()
+  await expect(panel.locator('#env-picker')).toBeHidden()
+  await send(panel)
+  expect(decodeURIComponent((await echoedRequest(panel)).url)).toBe('/echo/{{name}}')
+  await capture(panel, 'env-deleted-request-history-literal')
+})

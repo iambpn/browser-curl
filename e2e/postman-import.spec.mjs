@@ -72,6 +72,28 @@ async function importAndSend({extension, api}) {
   await expectValue(panel, '#auth-type', 'bearer')
   await expectValue(panel, '#bearer-token', 'folder-token')
   await capture(panel, 'postman-loaded-inherited-auth')
+  // Imported requests are linked too: templates require a chosen collection env.
+  const count = api.requests.length
+  await click(panel, '#send-request')
+  await expect(panel.locator('#request-error')).toContainText('“name”')
+  await expect(panel.locator('#request-error')).toContainText('no env is chosen')
+  expect(api.requests).toHaveLength(count)
+  await click(panel, '#show-collections')
+  await panel.getByRole('button', {name: 'Environments', exact: true}).last().click()
+  await panel.locator('#env-base-name').fill('name')
+  await click(panel, '#env-add-name')
+  await expect(panel.locator('#env-base-name')).toHaveValue('')
+  await panel.locator('#env-fork-name').fill('local')
+  await click(panel, '#env-new-fork')
+  await panel.getByRole('textbox', {name: 'Value for name', exact: true}).fill('imported-widget')
+  await expect.poll(async () => {
+    const {collections} = await panel.evaluate(storedCollections)
+    return collections.some((collection) => collection.env.forks.some((fork) =>
+      fork.variables.some((variable) => variable.name === 'name' && variable.value === 'imported-widget')))
+  }).toBe(true)
+  await click(panel, '#env-close')
+  await click(panel, '#close-collections')
+  await panel.locator('#env-picker').selectOption('local')
   await send(panel)
   const received = await echoedRequest(panel)
   expect(received.method).toBe('POST')
@@ -80,8 +102,10 @@ async function importAndSend({extension, api}) {
   expect(received.headers['x-disabled']).toBeUndefined()
   expect(received.headers['content-type']).toBe('application/json')
   expect(received.headers.authorization).toBe('Bearer folder-token')
-  expect(received.body).toBe('{"widget":"{{name}}"}')
-  expect(await panel.evaluate(storedHistory)).toHaveLength(1)
+  expect(received.body).toBe('{"widget":"imported-widget"}')
+  const history = await panel.evaluate(storedHistory)
+  expect(history).toHaveLength(1)
+  expect(history[0].editor.body).toBe('{"widget":"{{name}}"}')
   await capture(panel, 'postman-sent-echo')
   await extension.restart()
   panel = await extension.openPanel()
@@ -92,7 +116,7 @@ async function importAndSend({extension, api}) {
   await click(panel, '#auth-tab')
   await expectValue(panel, '#bearer-token', 'collection-token')
 }
-test('imports a v2.1 file as a new expanded collection, shows warnings, and sends an inherited-auth request', importAndSend)
+test('imports a v2.1 file as a new expanded collection, shows warnings, and sends with inherited auth and a collection env', importAndSend)
 
 test('sends imported object URLs with decoded query rows and preserved empty path segments', async ({extension, api}) => {
   const panel = await extension.openPanel()
