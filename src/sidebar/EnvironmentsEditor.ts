@@ -198,7 +198,9 @@ export class EnvironmentsEditor {
     // Row indices change when a preceding variable is deleted; follow its identity.
     const restored = input && Array.from(this.section.querySelectorAll<HTMLInputElement>('input')).find((candidate) =>
       input.dataset.variableKey ? candidate.dataset.variableKey === input.dataset.variableKey : candidate.id === input.id)
-    if (restored) {
+    if (restored && input) {
+      // Name drafts live only in the input; restore text before its selection.
+      restored.value = input.value
       restored.focus()
       if (selection) restored.setSelectionRange(...selection)
     } else if (fallback) {
@@ -353,6 +355,7 @@ export class EnvironmentsEditor {
       }
       content.append(this.nameForm('env-variable-name', 'env-add-variable', 'Fork-only variable name', 'Add variable', (name) => {
         void this.edit((env) => addForkVariable(env, fork.id, name), () => {
+          element<HTMLInputElement>('#env-variable-name').value = ''
           this.renderKeepingInput('#env-variable-name')
         })
       }))

@@ -177,6 +177,65 @@ for (const selection of ['caret', 'selection']) {
   })
 }
 
+for (const selection of ['caret', 'selection']) {
+  test(`typing a fork-only name through a fork rename save preserves draft, focus and ${selection}`, async ({extension, api}) => {
+    const panel = await extension.openPanel()
+    await setup(panel, api, 'API')
+    await newFork(panel, 'local')
+    await click(panel, '#env-rename-fork')
+    await fill(panel, '#env-rename-fork-name', 'staging')
+
+    // Hold the real rename acknowledgement while a new variable name is drafted.
+    await panel.evaluate(() => {
+      const set = chrome.storage.local.set.bind(chrome.storage.local)
+      chrome.storage.local.set = (items, callback) => {
+        if (!Object.keys(items).some((key) => key.startsWith('browsercurl.collection.'))) return set(items, callback)
+        chrome.storage.local.set = set
+        set(items, () => { window.finishForkRenameSave = callback })
+      }
+    })
+    await click(panel, '#env-save-fork-name')
+    await panel.waitForFunction(() => typeof window.finishForkRenameSave === 'function')
+    const name = panel.getByRole('textbox', {name: 'Fork-only variable name', exact: true})
+    await name.focus()
+    await panel.keyboard.type('prefix')
+    if (selection === 'selection') {
+      await panel.keyboard.press('ArrowLeft')
+      await panel.keyboard.press('ArrowLeft')
+      await panel.keyboard.press('Shift+ArrowLeft')
+      await panel.keyboard.press('Shift+ArrowLeft')
+    }
+    const caret = await name.evaluate((input) => [input.selectionStart, input.selectionEnd, input.selectionDirection])
+    await proof(panel, `env-fork-name-draft-during-rename-${selection}`)
+    await panel.evaluate(() => window.finishForkRenameSave())
+    await expect(panel.getByRole('tab', {name: 'staging', exact: true})).toHaveAttribute('aria-selected', 'true')
+    const restoredCaret = await name.evaluate((input) => [input.selectionStart, input.selectionEnd, input.selectionDirection])
+
+    // No locator action may refocus the rebuilt field before typing continues.
+    await panel.keyboard.type('suffix')
+    const expected = selection === 'caret' ? 'prefixsuffix' : 'prsuffixix'
+    await expect(name).toHaveValue(expected)
+    await expect(name).toBeFocused()
+    expect(restoredCaret).toEqual(caret)
+    await proof(panel, `env-fork-name-draft-after-rename-${selection}`)
+
+    await panel.keyboard.press('Enter')
+    await expect(name).toHaveValue('')
+    const value = panel.getByRole('textbox', {name: `Value for ${expected}`, exact: true})
+    await value.fill('fork-only-value')
+    await expect(panel.locator('#env-add-variable')).toBeEnabled()
+    await closeEnv(panel)
+    await panel.locator('#env-picker').selectOption('staging')
+    await fill(panel, '#request-url', `${api.origin}/echo?extra={{${expected}}}`)
+    await send(panel)
+    expect((await echoedRequest(panel)).url).toBe('/echo?extra=fork-only-value')
+    await openEnv(panel, 'API')
+    await panel.getByRole('tab', {name: 'staging', exact: true}).click()
+    await expect(value).toHaveValue('fork-only-value')
+    await proof(panel, `env-fork-name-draft-saved-${selection}`)
+  })
+}
+
 for (const operation of ['add', 'delete']) {
   for (const selection of ['caret', 'selection']) {
     test(`typing through a fork-only ${operation} save preserves value focus and ${selection}`, async ({extension, api}) => {
