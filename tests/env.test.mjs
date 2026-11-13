@@ -1,8 +1,136 @@
 /** Public env operations and resolution, independent of extension APIs. */
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
+import * as edits from '../src/env/env.ts'
 import {addBaseName, createEnv, createFork, removeBaseName, setForkValue, pickerOptions, resolveEditor, collectionEnvs, requestEnvChain} from '../src/env/env.ts'
 import {editorFixture} from './helpers/extension-storage.mjs'
+
+test('renaming a base name keeps each old value and adds the trimmed new name empty', () => {
+  const env = createEnv()
+  addBaseName(env, 'old')
+  createFork(env, 'one', 'local')
+  createFork(env, 'two', 'staging')
+  setForkValue(env, 'one', 'old', 'kept')
+  edits.renameBaseName(env, 'old', ' new ')
+  assert.deepEqual(env.baseNames, ['new'])
+  assert.deepEqual(env.forks.map(({variables}) => variables), [
+    [{name: 'old', value: 'kept'}, {name: 'new', value: ''}],
+    [{name: 'old', value: ''}, {name: 'new', value: ''}]
+  ])
+})
+
+test('base rename rejects invalid and duplicate names without changing anything; same name is a no-op', () => {
+  const env = createEnv()
+  addBaseName(env, 'old')
+  addBaseName(env, 'taken')
+  createFork(env, 'one', 'local')
+  const before = structuredClone(env)
+  for (const invalid of ['', '  ', '{new', 'new}', ' taken ']) {
+    assert.throws(() => edits.renameBaseName(env, 'old', invalid))
+    assert.deepEqual(env, before)
+  }
+  assert.throws(() => edits.renameBaseName(env, 'absent', 'new'))
+  edits.renameBaseName(env, 'old', ' old ')
+  assert.deepEqual(env, before)
+})
+
+test('fork variables list base order and computed marks before fork-only insertion order', () => {
+  const env = createEnv()
+  createFork(env, 'one', 'local')
+  edits.addForkVariable(env, 'one', ' extra ')
+  setForkValue(env, 'one', 'extra', 'kept')
+  addBaseName(env, 'second')
+  addBaseName(env, 'extra')
+  edits.addForkVariable(env, 'one', 'tail')
+  assert.deepEqual(edits.forkVariables(env, 'one'), [
+    {name: 'second', value: '', fromBase: true},
+    {name: 'extra', value: 'kept', fromBase: true},
+    {name: 'tail', value: '', fromBase: false}
+  ])
+  assert.throws(() => edits.deleteForkVariable(env, 'one', 'extra'), /base/)
+  removeBaseName(env, 'extra')
+  assert.deepEqual(edits.forkVariables(env, 'one'), [
+    {name: 'second', value: '', fromBase: true},
+    {name: 'extra', value: 'kept', fromBase: false},
+    {name: 'tail', value: '', fromBase: false}
+  ])
+  edits.deleteForkVariable(env, 'one', 'extra')
+  assert.deepEqual(env.forks[0].variables, [{name: 'second', value: ''}, {name: 'tail', value: ''}])
+})
+
+test('fork-only names follow variable name rules and renaming a base can adopt an existing fork-only value', () => {
+  const env = createEnv()
+  addBaseName(env, 'old')
+  createFork(env, 'one', 'local')
+  edits.addForkVariable(env, 'one', ' new ')
+  setForkValue(env, 'one', 'new', 'retained')
+  const before = structuredClone(env)
+  for (const invalid of ['', '  ', '{bad', 'bad}', ' new ', 'old']) {
+    assert.throws(() => edits.addForkVariable(env, 'one', invalid))
+    assert.deepEqual(env, before)
+  }
+  edits.addForkVariable(env, 'one', 'New')
+  edits.renameBaseName(env, 'old', 'new')
+  assert.deepEqual(edits.forkVariables(env, 'one'), [
+    {name: 'new', value: 'retained', fromBase: true},
+    {name: 'old', value: '', fromBase: false},
+    {name: 'New', value: '', fromBase: false}
+  ])
+  assert.throws(() => edits.addForkVariable(env, 'absent', 'name'))
+  assert.throws(() => edits.deleteForkVariable(env, 'one', 'absent'))
+})
+
+test('fork rename trims names, preserves IDs, order and values, and rejects empty and duplicate names', () => {
+  const env = createEnv()
+  addBaseName(env, 'token')
+  createFork(env, 'one', 'local')
+  createFork(env, 'two', 'staging')
+  setForkValue(env, 'one', 'token', 'kept')
+  const before = structuredClone(env)
+  for (const invalid of ['', '  ', ' staging ']) {
+    assert.throws(() => edits.renameFork(env, 'one', invalid))
+    assert.deepEqual(env, before)
+  }
+  assert.throws(() => edits.renameFork(env, 'absent', 'new'))
+  edits.renameFork(env, 'one', ' local ')
+  assert.deepEqual(env, before)
+  edits.renameFork(env, 'one', ' Staging ')
+  assert.deepEqual(env.forks, [{...before.forks[0], name: 'Staging'}, before.forks[1]])
+})
+
+test('fork deletion needs confirmation for any nonempty value, including fork-only values and whitespace', () => {
+  const env = createEnv()
+  addBaseName(env, 'token')
+  createFork(env, 'empty', 'empty')
+  createFork(env, 'valued', 'valued')
+  edits.addForkVariable(env, 'valued', 'extra')
+  setForkValue(env, 'valued', 'extra', ' ')
+  const before = structuredClone(env)
+  assert.equal(edits.deleteFork(env, 'valued'), false)
+  assert.deepEqual(env, before)
+  assert.equal(edits.deleteFork(env, 'empty'), true)
+  assert.equal(edits.deleteFork(env, 'valued', true), true)
+  assert.deepEqual(env.forks, [])
+})
+
+for (const action of ['rename', 'delete']) {
+  test(`chosen env resets only when the last fork with that name is ${action === 'rename' ? 'renamed' : 'deleted'}`, () => {
+    const tree = {id: 'collection', env: createEnv(), chosenEnv: 'local', requests: [
+      {id: 'folder', env: createEnv(), requests: [{id: 'request', env: createEnv()}]}
+    ]}
+    const folder = tree.requests[0].env
+    const request = tree.requests[0].requests[0].env
+    createFork(folder, 'folder-fork', 'local')
+    createFork(request, 'request-fork', 'local')
+    const change = (env, id) => action === 'rename' ? edits.renameFork(env, id, 'staging') : edits.deleteFork(env, id)
+    change(folder, 'folder-fork')
+    edits.resetMissingChosenEnv(tree)
+    assert.equal(tree.chosenEnv, 'local')
+    change(request, 'request-fork')
+    edits.resetMissingChosenEnv(tree)
+    assert.equal(tree.chosenEnv, null)
+  })
+}
 
 test('adding a base name gives every fork an empty value', () => {
   const env = createEnv()

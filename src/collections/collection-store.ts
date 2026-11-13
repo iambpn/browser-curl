@@ -3,7 +3,7 @@ import type {CollectionRequestLink, EditorState} from '../history/request-state'
 import {readStorage, removeStorage, writeStorage} from '../shared/storage'
 import type {ImportedCollection, ImportedItem} from './postman-converter'
 import {exportPostmanCollection} from './postman-converter'
-import {collectionEnvs, createEnv, pickerOptions} from '../env/env'
+import {collectionEnvs, createEnv, pickerOptions, resetMissingChosenEnv} from '../env/env'
 import type {LevelEnv} from '../env/env'
 
 /** One entry in the collection index, in creation order. */
@@ -192,13 +192,6 @@ export function chooseCollectionEnv(id: string, name: string | null): Promise<vo
     collection.chosenEnv = name
     await writeStorage({[COLLECTION_KEY_PREFIX + id]: collection})
   })
-}
-
-/** Removing a level or its last matching fork also removes a stale collection selection. */
-function resetMissingChosenEnv(collection: Collection): void {
-  if (collection.chosenEnv && !pickerOptions(collectionEnvs(collection)).some(({name}) => name === collection.chosenEnv)) {
-    collection.chosenEnv = null
-  }
 }
 
 /** Append a folder to a collection or folder, preserving creation order. */

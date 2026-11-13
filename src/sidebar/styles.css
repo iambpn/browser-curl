@@ -79,6 +79,28 @@
   width: 0;
 }
 
+.env-variable-row > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.env-variable-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.env-variable-heading label {
+  flex: 1;
+  min-width: 0;
+}
+
+.env-base-mark {
+  color: var(--muted);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
 * {
   box-sizing: border-box;
 }
