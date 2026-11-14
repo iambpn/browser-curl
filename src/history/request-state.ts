@@ -15,10 +15,24 @@ export interface EditorState {
   authValues: Record<string, string>
 }
 
-/** An editor snapshot and the saved request whose result the panel displays. */
+/** The collection request that Save updates. */
+export interface CollectionRequestLink {
+  collectionId: string
+  requestId: string
+}
+
+/** Send-only provenance travels with the editor snapshot through the unchanged HTTP runner. */
+export interface SentEditorState extends EditorState {
+  collectionRequest?: CollectionRequestLink
+}
+
+/** An editor snapshot, its collection destination, and the saved send whose result the panel displays. */
 export interface PanelSnapshot {
   editor: EditorState
   responseId?: string
+  collectionRequest?: CollectionRequestLink
+  /** Origin used only for resolution; a history preview has no collection Save target. */
+  historySource?: CollectionRequestLink
 }
 
 /** The current draft and an optional history preview that keeps the draft available. */
@@ -33,6 +47,7 @@ export interface SavedRequest {
   name: string
   sentAt: number
   editor: EditorState
+  collectionRequest?: CollectionRequestLink
   request: HttpRequestPayload
   result?: HttpResultMessage
 }

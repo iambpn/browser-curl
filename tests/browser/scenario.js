@@ -5,6 +5,7 @@ const connections = new Set()
 let panel
 let failDraftWrite = false
 let failHistoryWrite = false
+let failCollectionWrite = false
 let failDeletion = false
 let failWorkspaceRead = false
 
@@ -108,9 +109,11 @@ window.chrome = {
       /** Complete a write or expose its simulated error only during the callback. */
       function storeValues() {
         const isDraft = Object.hasOwn(snapshot, 'browsercurl.workspace')
-        if ((isDraft && failDraftWrite) || (!isDraft && failHistoryWrite)) {
+        const isCollection = Object.keys(snapshot).some((key) => key.startsWith('browsercurl.collection.'))
+        if ((isDraft && failDraftWrite) || (isCollection && failCollectionWrite) || (!isDraft && !isCollection && failHistoryWrite)) {
           failDraftWrite = false
           failHistoryWrite = false
+          failCollectionWrite = false
           chrome.runtime.lastError = {message: 'Storage unavailable'}
           callback()
           chrome.runtime.lastError = undefined
@@ -436,8 +439,38 @@ async function run() {
   await openPanel()
   expectValue('#request-url', 'https://slow.example.test', 'A failed restoration must not let a blank editor overwrite the saved draft.')
   expectText('#request-name', 'My slow request', 'A failed restoration must not overwrite the saved request name.')
+  check(find('#save-as').hidden, 'Save as must stay hidden until the request is saved in a collection.')
+  find('#save-request').click()
+  await until(() => !find('#confirm-save-as').disabled, 'Save as did not load collections.')
+  enter('#new-collection-name', 'Saved API')
+  failCollectionWrite = true
+  find('#confirm-save-as').click()
+  await until(elementVisible.bind(null, '#save-as-error'), 'A rejected collection save must show an error.')
+  expectTextContains('#save-as-error', 'Your request was not saved.', 'A storage failure must clearly report that the request was not saved.')
+  check(find('#save-as-dialog').open, 'A failed save must keep the form available for retry.')
+  check(find('#collection-save-status').hidden, 'A failed collection save must not report success.')
+  check(!values.has('browsercurl.collectionIndex'), 'A failed new collection save must not create an index entry.')
+  check(![...values.keys()].some((key) => key.startsWith('browsercurl.collection.')), 'A failed new collection save must not leave an orphan collection.')
+  expectValue('#request-url', 'https://slow.example.test', 'A failed save must preserve the editor.')
+  find('#confirm-save-as').click()
+  await until(() => !find('#save-as-dialog').open, 'Retrying a collection save must succeed.')
+  const collectionId = values.get('browsercurl.collectionIndex')[0].id
+  const collectionKey = 'browsercurl.collection.' + collectionId
+  expectEqual(values.get(collectionKey).requests.length, 1, 'Retry must save one request only.')
+  await until(() => !find('#save-as').hidden, 'Save as must appear after the request is saved.')
+  find('#save-as').click()
+  await until(() => !find('#confirm-save-as').disabled, 'Existing collections did not load.')
+  enter('#save-request-name', 'Second request')
+  failCollectionWrite = true
+  find('#confirm-save-as').click()
+  await until(elementVisible.bind(null, '#save-as-error'), 'An existing collection write failure must be visible.')
+  expectEqual(values.get(collectionKey).requests.length, 1, 'A rejected addition must keep the saved collection unchanged.')
+  check(find('#collection-save-status').hidden, 'A rejected addition must not leave a success message.')
+  find('#confirm-save-as').click()
+  await until(() => !find('#save-as-dialog').open, 'A rejected addition must allow retry.')
+  expectEqual(values.get(collectionKey).requests.length, 2, 'Retry must add exactly one request to the existing collection.')
   closePanel()
-  return 'PASS: draft and credential persistence, hostname naming, complete history restore, running icons, background completion, preserved drafts, clear form, deletion, restored cancellation, and narrow history layout.'
+  return 'PASS: draft and credential persistence, hostname naming, complete history restore, running icons, background completion, preserved drafts, clear form, deletion, restored cancellation, narrow history layout, and collection storage failures with successful retries.'
 }
 
 /** Report workflow results to the command-line runner without exposing saved request contents. */

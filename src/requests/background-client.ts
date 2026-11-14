@@ -6,7 +6,7 @@ import type {
   HttpResultMessage,
   HttpSendMessage
 } from './http-messages'
-import type {EditorState} from '../history/request-state'
+import type {SentEditorState} from '../history/request-state'
 
 /**
  * Send one request and wait for the complete response.
@@ -14,7 +14,7 @@ import type {EditorState} from '../history/request-state'
  */
 export function sendThroughBackground(
   request: HttpRequestPayload,
-  editor: EditorState,
+  editor: SentEditorState,
   id: string
 ): Promise<HttpResultMessage> {
   /** Connect a port for this request and settle the promise with its first result. */
