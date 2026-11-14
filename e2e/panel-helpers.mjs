@@ -110,3 +110,36 @@ export function sessionRules() {
 export function clipboardText() {
   return navigator.clipboard.readText()
 }
+
+/** Browser callback for page.evaluate(): read collections and their index from real extension storage. */
+export async function storedCollections() {
+  const items = await chrome.storage.local.get(null)
+  return {
+    index: items['browsercurl.collectionIndex'] ?? [],
+    collections: Object.entries(items).filter(([key]) => key.startsWith('browsercurl.collection.')).map(([, value]) => value)
+  }
+}
+
+/** Fork Base into a new env: select Base, click the fork icon, then name the fork in its tab field. */
+export async function forkBase(page, name) {
+  await page.getByRole('tab', {name: 'Base', exact: true}).click()
+  await page.locator('#env-new-fork').click()
+  const field = page.locator('#env-rename-fork-name')
+  await expect(field).toBeFocused()
+  await field.fill(name)
+  await field.press('Enter')
+  await expect(page.getByRole('tab', {name: name.trim(), exact: true})).toHaveAttribute('aria-selected', 'true')
+}
+
+/** Delete the selected fork: the first click asks for confirmation in a tooltip, the second deletes. */
+export async function deleteSelectedFork(page) {
+  await page.locator('#env-delete-fork').click()
+  await expect(page.locator('#env-delete-tooltip')).toBeVisible()
+  await page.locator('#env-delete-fork').click()
+}
+
+/** The Save as label of a folder: indented once per level under the collection root, then its path. */
+export function folderOption(...path) {
+  const indent = '\u00a0'.repeat(4 * path.length)
+  return `${indent}\u{1F4C1} ${path.join(' / ')}`
+}
