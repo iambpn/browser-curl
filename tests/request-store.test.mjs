@@ -58,6 +58,15 @@ async function responseRoundTrip() {
 }
 test('keeps separate send attempts and complete response data', responseRoundTrip)
 
+test('history records collection provenance independently of the original editor and replaced payload', async () => {
+  storage()
+  const saved = savedFixture()
+  const editor = {...saved.editor, url: '{{baseUrl}}/items'}
+  const collectionRequest = {collectionId: 'collection', requestId: 'request'}
+  await createSavedRequest({...saved, editor: {...editor, collectionRequest}})
+  assert.deepEqual(await loadSavedRequest(saved.id), {...saved, editor, collectionRequest})
+})
+
 /** Test both completion/deletion orderings so a response cannot restore a deleted request. */
 async function deletionRaces() {
   storage()

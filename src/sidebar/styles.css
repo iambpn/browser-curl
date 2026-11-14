@@ -12,6 +12,267 @@
   --text: #30333a;
 }
 
+.env-picker {
+  max-width: 140px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+  padding: 3px 5px;
+  font-size: 11px;
+}
+
+.env-editor {
+  display: grid;
+  gap: 14px;
+  min-height: 0;
+  padding: 18px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+
+.env-editor > .history-heading {
+  padding: 0 0 14px;
+}
+
+.history-dialog .env-editor > .request-error {
+  margin: 0;
+}
+
+.env-inherited {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 5px;
+  background: var(--canvas);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.env-tab-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.env-tabs {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.env-tabs button {
+  padding: 8px;
+  overflow-wrap: anywhere;
+}
+
+.env-tabs [aria-selected='true'] {
+  color: var(--accent);
+  border-bottom: 2px solid var(--accent);
+}
+
+.env-tab-name {
+  max-width: 100%;
+  margin-bottom: 3px;
+  padding: 5px 7px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--surface);
+  font-size: 10px;
+  outline: none;
+}
+
+/* Keep name suggestions while typing, but hide Chrome's dropdown arrow. */
+.env-tab-name::-webkit-calendar-picker-indicator {
+  display: none !important;
+}
+
+.env-tab-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+  padding-bottom: 4px;
+}
+
+.env-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.env-icon-button:hover:not(:disabled), .env-icon-button:focus-visible {
+  color: var(--accent);
+  background: var(--canvas);
+}
+
+.env-icon-button.is-confirming, .env-icon-button.is-confirming:hover:not(:disabled) {
+  color: #cf5656;
+  background: rgb(207 86 86 / 14%);
+}
+
+.env-delete-control {
+  position: relative;
+  display: inline-flex;
+}
+
+.env-tooltip {
+  position: absolute;
+  top: calc(100% + 7px);
+  right: -32px;
+  z-index: 2;
+  width: max-content;
+  max-width: 200px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  background: var(--text);
+  color: var(--surface);
+  font-size: 10px;
+  line-height: 1.5;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 18%);
+}
+
+.env-tooltip::before {
+  content: '';
+  position: absolute;
+  top: -4px;
+  right: 42px;
+  width: 8px;
+  height: 8px;
+  background: inherit;
+  transform: rotate(45deg);
+}
+
+.env-form {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.env-variable-row, .env-input-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.env-variable-row {
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+
+.env-input-row input {
+  flex: 1;
+  width: 0;
+}
+
+.env-variable-row > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.env-table-heading, .env-value-row {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr) 28px;
+  align-items: center;
+}
+
+.env-table-heading {
+  min-height: 27px;
+  background: var(--canvas);
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+}
+
+.env-table-heading span {
+  padding-left: 8px;
+}
+
+.env-value-row, .env-add-row, .env-table-empty {
+  border-top: 1px solid var(--line);
+}
+
+.env-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px;
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.env-name-cell label {
+  min-width: 0;
+}
+
+.env-base-mark {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.env-value-input {
+  width: 100%;
+  min-height: 34px;
+  border: 0;
+  border-left: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  padding: 8px;
+  font-size: 10px;
+}
+
+/* A bordered box, like the other form inputs, so the add field reads as a place to type. */
+.env-add-row input {
+  width: 100%;
+  min-height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--canvas);
+  padding: 6px 8px;
+  font-size: 10px;
+}
+
+.env-value-input:focus, .env-value-row .remove-button:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.env-table-empty {
+  margin: 0;
+  padding: 10px 8px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.env-add-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+}
+
+.env-add-row .add-button {
+  padding: 5px 10px;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -142,6 +403,13 @@ h1, h2, h3, p {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+/* In a narrow panel, New request shows only its plus icon so the header still fits. */
+@media (max-width: 360px) {
+  .header-button-label {
+    display: none;
+  }
 }
 
 .storage-error {
@@ -403,6 +671,156 @@ main {
 .history-delete:hover {
   color: #cc5757;
   background: var(--canvas);
+}
+
+.collections-toolbar,
+.collection-item-form {
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.collections-toolbar {
+  display: flex;
+  gap: 8px;
+}
+
+#collection-import-notice {
+  margin: 12px 18px;
+  flex-shrink: 0;
+}
+
+.collection-item-form .auth-input {
+  width: 100%;
+  margin-bottom: 12px;
+}
+
+.collection-children {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.collection-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* Keep room for names and actions at every depth; the containing list scrolls. */
+  min-width: calc(320px + var(--collection-depth) * 18px);
+  padding-left: calc(12px + var(--collection-depth) * 18px);
+  padding-right: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.collection-request {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 100px;
+  padding: 14px 0;
+  background: transparent;
+  text-align: left;
+  font-size: 12px;
+}
+
+/* Keep the kind icon at full size when a long name shrinks the row. */
+.collection-kind-icon {
+  flex: none;
+  margin-left: -2px;
+}
+
+/* Collections and folders also hold the kind icon, so keep the same room for their names as requests have. */
+.collection-request:not([data-open-collection-request]) {
+  min-width: 124px;
+}
+
+.collection-row:hover {
+  background: var(--canvas);
+}
+
+.collection-rename {
+  flex: 1;
+  min-width: 100px;
+  width: 0;
+  margin: 6px 0;
+}
+
+.collection-action {
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.save-as-form {
+  padding: 18px;
+  overflow-y: auto;
+}
+
+.save-as-form .auth-input {
+  width: 100%;
+  margin-bottom: 16px;
+}
+
+.save-as-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 18px;
+}
+
+.collection-save-status {
+  margin-bottom: 12px;
+  color: var(--text);
+  font-size: 11px;
+}
+
+.collection-unsaved-warning {
+  padding: 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  background: var(--canvas);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+#request-collection {
+  max-width: 130px;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 400px) {
+  .request-heading {
+    flex-wrap: wrap;
+    padding-top: 6px;
+    padding-bottom: 6px;
+    gap: 4px;
+  }
+
+  .request-heading .workspace-actions {
+    margin-left: auto;
+  }
+
+  .app-header {
+    height: auto;
+    min-height: 64px;
+    padding: 12px 14px;
+    flex-wrap: wrap;
+  }
+
+  .header-actions {
+    margin-left: auto;
+  }
+
+  .request-actions {
+    flex-wrap: wrap;
+  }
+
+  .request-actions .url-help {
+    flex-basis: 100%;
+  }
 }
 
 .request-section {

@@ -1,7 +1,8 @@
 /** The sidebar's request editor and response viewer. */
 import {controlSavedRequest, sendThroughBackground} from '../requests/background-client'
 import type {CurlImport} from '../requests/curl-import'
-import {buildRequest, parseRequestUrl} from '../requests/request'
+import {buildRequest} from '../requests/request'
+import {editorUrlParts, encodeEditorParameter} from '../requests/editor-url'
 import {formatResponse, formatSize} from '../responses/format-response'
 import type {RequestAuthorization, RequestDraft, RequestEntry} from '../requests/request-types'
 import {loadResponseHeight, saveResponseHeight} from '../responses/response-height'
@@ -10,8 +11,11 @@ import type {HttpResultMessage} from '../requests/http-messages'
 import {
   HISTORY_INDEX_KEY, HISTORY_KEY_PREFIX, listHistorySummaries, loadSavedRequest, loadWorkspace, saveWorkspace
 } from '../history/request-store'
+import {CollectionsPanel} from './CollectionsPanel'
+import {COLLECTION_KEY_PREFIX, chooseCollectionEnv, findCollectionRequest, loadCollection} from '../collections/collection-store'
+import {collectionEnvs, pickerOptions, requestEnvChain, resolveEditor} from '../env/env'
 import {resolveRequestName} from '../history/request-state'
-import type {EditorState, HistorySummary, PanelSnapshot, SavedRequest} from '../history/request-state'
+import type {CollectionRequestLink, EditorState, HistorySummary, PanelSnapshot, SavedRequest} from '../history/request-state'
 
 /** Milliseconds to wait after the last keystroke before the panel saves the draft. */
 const DRAFT_SAVE_DELAY_MS = 300
@@ -163,6 +167,11 @@ class SidebarApp {
   private sentRequestIds = new Set<string>()
   private draftSaveTimer: ReturnType<typeof setTimeout> | undefined
   private draftBeforeHistory: PanelSnapshot | undefined
+  private collectionRequest: CollectionRequestLink | undefined
+  private historySource: CollectionRequestLink | undefined
+  private preparingSend = false
+  private editorRevision = 0
+  private collectionHeadingRevision = 0
   private responseId: string | undefined
   private responseRevision = 0
   private runningId: string | undefined
@@ -221,6 +230,7 @@ class SidebarApp {
     this.historyList.addEventListener('click', this.handleHistoryClick)
     this.backToDraftButton.addEventListener('click', this.backToDraft)
     element('#clear-request').addEventListener('click', this.clearRequest)
+    element('#new-request').addEventListener('click', this.clearRequest)
     chrome.storage.onChanged.addListener(this.handleStorageChange)
     element('#response-tabs').addEventListener('click', this.handleResponseTab)
     element('#response-tabs').addEventListener('keydown', this.handleTabKey)
@@ -242,6 +252,11 @@ class SidebarApp {
     this.updateMethod()
     this.updateAuthorization()
     this.fitResponse()
+    new CollectionsPanel(
+      () => this.readEditorState(), this.openCollectionRequest,
+      () => this.collectionRequest, this.linkCollectionRequest, () => this.editorRevision
+    )
+    element<HTMLSelectElement>('#env-picker').addEventListener('change', this.chooseEnv)
     void this.restoreWorkspace()
   }
 
@@ -255,6 +270,9 @@ class SidebarApp {
         this.draftBeforeHistory = workspace.preview ? workspace.draft : undefined
         const snapshot = workspace.preview ?? workspace.draft
         this.applyEditorState(snapshot.editor)
+        this.collectionRequest = snapshot.collectionRequest
+        this.historySource = snapshot.historySource
+        void this.updateCollectionHeading()
         this.responseId = snapshot.responseId
         await this.restoreResponse()
       }
@@ -273,7 +291,10 @@ class SidebarApp {
 
   /** Read the current editor and the response reference without copying response bodies into the draft. */
   private readPanelSnapshot(): PanelSnapshot {
-    return {editor: this.readEditorState(), responseId: this.responseId}
+    return {
+      editor: this.readEditorState(), responseId: this.responseId,
+      collectionRequest: this.collectionRequest, historySource: this.historySource
+    }
   }
 
   /** Save the editor now and cancel a pending delayed save. Background request completion stores responses separately. */
@@ -491,6 +512,9 @@ class SidebarApp {
       const saved = await loadSavedRequest(open.dataset.openHistory!)
       if (!saved) return
       if (!this.draftBeforeHistory) this.draftBeforeHistory = this.readPanelSnapshot()
+      this.collectionRequest = undefined
+      this.historySource = saved.collectionRequest
+      void this.updateCollectionHeading()
       this.hideImportNotice()
       this.resetResponse()
       this.applyEditorState(saved.editor)
@@ -504,6 +528,77 @@ class SidebarApp {
     }
   }
 
+  /** Load all saved editor values and start with a fresh response through the usual send path. */
+  private openCollectionRequest = (editor: EditorState, link: CollectionRequestLink): void => {
+    this.draftBeforeHistory = undefined
+    this.responseId = undefined
+    this.responseRevision += 1
+    this.hideImportNotice()
+    this.resetResponse()
+    this.applyEditorState(editor)
+    this.collectionRequest = link
+    this.historySource = undefined
+    void this.updateCollectionHeading()
+    this.updateWorkspaceLabel()
+    this.persistWorkspace()
+  }
+
+  /** Save as changes the destination and, unless edited during the save, the request name. */
+  private linkCollectionRequest = (link: CollectionRequestLink, name?: string): void => {
+    this.collectionRequest = link
+    this.historySource = undefined
+    if (name !== undefined) this.requestName = name
+    this.updateRequestName()
+    void this.updateCollectionHeading()
+    this.persistWorkspace()
+  }
+
+  /**
+   * Resolve the collection name from storage so restored and renamed collections show their current names.
+   * Save as appears only for a request saved in a collection; Save already asks for a destination otherwise.
+   */
+  private async updateCollectionHeading(): Promise<void> {
+    const revision = ++this.collectionHeadingRevision
+    const heading = element('#request-collection')
+    const picker = element<HTMLSelectElement>('#env-picker')
+    const saveAs = element('#save-as')
+    const link = this.collectionRequest
+    heading.hidden = true
+    picker.hidden = true
+    saveAs.hidden = !link
+    if (!link) return
+    try {
+      const collection = await loadCollection(link.collectionId)
+      if (revision !== this.collectionHeadingRevision || this.disposed) return
+      const isSaved = Boolean(collection && findCollectionRequest(collection, link.requestId))
+      saveAs.hidden = !isSaved
+      if (!collection || !isSaved) return
+      heading.textContent = collection.name
+      heading.title = collection?.name ?? ''
+      heading.hidden = !collection
+      picker.replaceChildren(...pickerOptions(collectionEnvs(collection)).map(({name, label}) => new Option(label, name ?? '')))
+      picker.value = collection.chosenEnv ?? ''
+      picker.hidden = false
+    } catch {
+      // Keep the editor usable when the collection name cannot be read; Save reports storage failures.
+    }
+  }
+
+  private chooseEnv = async (): Promise<void> => {
+    const link = this.collectionRequest
+    const picker = element<HTMLSelectElement>('#env-picker')
+    if (!link) return
+    picker.disabled = true
+    try {
+      await chooseCollectionEnv(link.collectionId, picker.value || null)
+    } catch (error) {
+      this.showError(error instanceof Error ? error.message : 'Could not save the chosen env.')
+    } finally {
+      picker.disabled = false
+      void this.updateCollectionHeading()
+    }
+  }
+
   /** Return from a history preview to the untouched draft and its saved response. */
   private backToDraft = async (): Promise<void> => {
     const draft = this.draftBeforeHistory
@@ -511,6 +606,9 @@ class SidebarApp {
     this.draftBeforeHistory = undefined
     this.hideImportNotice()
     this.applyEditorState(draft.editor)
+    this.collectionRequest = draft.collectionRequest
+    this.historySource = draft.historySource
+    void this.updateCollectionHeading()
     this.responseId = draft.responseId
     try {
       await this.restoreResponse()
@@ -521,10 +619,16 @@ class SidebarApp {
     this.persistWorkspace()
   }
 
-  /** Empty every form value and the visible response, while keeping saved history and background sends. */
+  /**
+   * Empty every form value and the visible response, while keeping saved history and background sends.
+   * New request uses this too: a new request is a blank form with no collection link.
+   */
   private clearRequest = (): void => {
     this.canPersistWorkspace = true
     this.draftBeforeHistory = undefined
+    this.collectionRequest = undefined
+    this.historySource = undefined
+    void this.updateCollectionHeading()
     this.responseId = undefined
     this.hideImportNotice()
     this.resetResponse()
@@ -546,6 +650,9 @@ class SidebarApp {
   /** Update open history and the displayed response when the background stores a result or deletion. */
   private handleStorageChange = (changes: Record<string, chrome.storage.StorageChange>, area: string): void => {
     if (area !== 'local' || this.disposed) return
+    if (this.collectionRequest && changes[COLLECTION_KEY_PREFIX + this.collectionRequest.collectionId]) {
+      void this.updateCollectionHeading()
+    }
     const indexChange = changes[HISTORY_INDEX_KEY]
     if (indexChange && this.historyDialog.open) {
       const summaries = (indexChange.newValue ?? []) as HistorySummary[]
@@ -608,20 +715,18 @@ class SidebarApp {
 
   /** Read URL parameters while retaining disabled rows and unfinished entries. */
   private readUrlParameters = (): void => {
-    let url: URL
-    try {
-      url = parseRequestUrl(this.url.value)
-    } catch {
-      return
-    }
-    if (url.search === this.lastUrlSearch) return
-    this.lastUrlSearch = url.search
+    if (isCurlCommand(this.url.value)) return
+    const {search} = editorUrlParts(this.url.value.trim())
+    if (search === this.lastUrlSearch) return
+    this.lastUrlSearch = search
     const retained: RequestEntry[] = []
     for (const entry of this.readRows('params')) {
       if (!entry.enabled || !entry.key.trim()) retained.push(entry)
     }
     element('#params-rows').replaceChildren()
-    for (const [key, value] of url.searchParams) {
+    // A reference's name can itself contain query delimiters; decode it as one key or value.
+    const params = new URLSearchParams(search.replace(/\{\{[^{}]*\}\}/g, encodeURIComponent))
+    for (const [key, value] of params) {
       this.addRow('params', {enabled: true, key, value})
     }
     for (const entry of retained) this.addRow('params', entry)
@@ -725,6 +830,7 @@ class SidebarApp {
 
   /** Replace every editor value and update the dependent labels, counts, and fields. */
   private applyEditorState(state: EditorState): void {
+    this.editorRevision += 1
     this.requestName = state.name
     this.nameInput.hidden = true
     this.nameButton.hidden = false
@@ -735,11 +841,7 @@ class SidebarApp {
     if (!hasMethod) this.method.add(new Option(state.method))
     this.method.value = state.method
     this.url.value = state.url
-    try {
-      this.lastUrlSearch = parseRequestUrl(state.url).search
-    } catch {
-      this.lastUrlSearch = ''
-    }
+    this.lastUrlSearch = editorUrlParts(state.url).search
     this.replaceRows('params', state.params)
     this.replaceRows('headers', state.headers)
     this.body.value = state.body
@@ -767,19 +869,15 @@ class SidebarApp {
 
   /** Reflect enabled parameter rows in the URL without losing other URL parts. */
   private updateUrl(): void {
-    try {
-      const url = parseRequestUrl(this.url.value)
-      url.search = ''
-      for (const entry of this.readRows('params')) {
-        if (entry.enabled && entry.key.trim()) {
-          url.searchParams.append(entry.key, entry.value)
-        }
-      }
-      this.lastUrlSearch = url.search
-      this.url.value = url.href
-    } catch {
-      // Parameter rows remain editable before a valid URL is entered.
-    }
+    if (isCurlCommand(this.url.value)) return
+    const {address, hash} = editorUrlParts(this.url.value.trim())
+    if (!address.trim()) return
+    const query = this.readRows('params')
+      .filter((entry) => entry.enabled && entry.key.trim())
+      .map((entry) => `${encodeEditorParameter(entry.key)}=${encodeEditorParameter(entry.value)}`)
+      .join('&')
+    this.lastUrlSearch = query ? `?${query}` : ''
+    this.url.value = address + this.lastUrlSearch + hash
   }
 
   /** Count enabled nonempty rows beside each request tab. */
@@ -936,27 +1034,28 @@ class SidebarApp {
   }
 
   /** Read only credentials for the selected authorization type. */
-  private readAuthorization(): RequestAuthorization {
-    switch (this.authType.value) {
+  private readAuthorization(editor: EditorState): RequestAuthorization {
+    const values = editor.authValues
+    switch (editor.authType) {
       case 'bearer':
-        return {type: 'bearer', token: element<HTMLInputElement>('#bearer-token').value}
+        return {type: 'bearer', token: values['bearer-token'] ?? ''}
       case 'basic':
         return {
           type: 'basic',
-          username: element<HTMLInputElement>('#basic-username').value,
-          password: element<HTMLInputElement>('#basic-password').value
+          username: values['basic-username'] ?? '',
+          password: values['basic-password'] ?? ''
         }
       case 'api-key': {
-        const location = element<HTMLSelectElement>('#api-key-location').value
+        const location = values['api-key-location']
         return {
           type: 'api-key',
-          key: element<HTMLInputElement>('#api-key-name').value,
-          value: element<HTMLInputElement>('#api-key-value').value,
+          key: values['api-key-name'] ?? '',
+          value: values['api-key-value'] ?? '',
           location: location === 'query' ? 'query' : 'header'
         }
       }
       case 'custom':
-        return {type: 'custom', value: element<HTMLInputElement>('#custom-authorization').value}
+        return {type: 'custom', value: values['custom-authorization'] ?? ''}
       default:
         return {type: 'none'}
     }
@@ -1061,6 +1160,7 @@ class SidebarApp {
   /** Send or cancel a request. A cURL command in the URL field is imported instead of sent. */
   private sendRequest = async (event: SubmitEvent): Promise<void> => {
     event.preventDefault()
+    if (this.preparingSend) return
     if (this.runningId) {
       await this.cancelRunningRequest()
       return
@@ -1072,28 +1172,47 @@ class SidebarApp {
     this.error.hidden = true
     this.hideImportNotice()
     let id: string | undefined
+    this.preparingSend = true
+    this.send.disabled = true
+    this.send.textContent = 'Preparing…'
     try {
+      const editor = this.readEditorState()
+      const link = this.collectionRequest ?? this.historySource
+      let resolved = editor
+      let existingLink: CollectionRequestLink | undefined
+      if (link) {
+        // Wait for pending env edits and picker writes before taking the send's collection snapshot.
+        const collection = await loadCollection(link.collectionId, {waitForWrites: true})
+        const chain = collection && requestEnvChain(collection, link.requestId)
+        if (collection && chain) {
+          existingLink = link
+          const result = resolveEditor(chain, collection.chosenEnv ?? null, editor)
+          if (result.missing) {
+            const names = result.missing.map((name) => `“${name}”`).join(', ')
+            const context = collection.chosenEnv ? `env “${collection.chosenEnv}”` : 'no env is chosen'
+            throw new Error(`Missing variables: ${names}; ${context}.`)
+          }
+          resolved = result.editor
+        }
+      }
+      if (this.disposed) return
       const draft: RequestDraft = {
-        method: this.method.value,
-        url: this.url.value,
-        params: this.readRows('params'),
-        headers: this.readRows('headers'),
-        body: this.body.value,
-        bodyType: this.bodyType.value,
-        authorization: this.readAuthorization()
+        ...resolved,
+        authorization: this.readAuthorization(resolved)
       }
       const request = buildRequest(draft)
       const payload = toPayload(request)
-      const editor = this.readEditorState()
       id = crypto.randomUUID()
       this.sentRequestIds.add(id)
       this.resetResponse()
       this.responseId = id
       this.runningId = id
+      this.send.disabled = false
       this.setLoading(true)
       this.updateWorkspaceLabel()
       this.persistWorkspace()
-      const result = await sendThroughBackground(payload, editor, id)
+      this.preparingSend = false
+      const result = await sendThroughBackground(payload, existingLink ? {...editor, collectionRequest: existingLink} : editor, id)
       if (this.disposed || this.responseId !== id) return
       this.showResult(result)
     } catch (error) {
@@ -1105,6 +1224,11 @@ class SidebarApp {
       this.emptyTitle.textContent = 'No response received'
       this.emptyDescription.textContent = 'Check the request details and try again.'
     } finally {
+      if (!id) {
+        this.preparingSend = false
+        this.send.disabled = false
+        this.send.textContent = 'Send'
+      }
       if (id && this.responseId === id) {
         this.runningId = undefined
         this.setLoading(false)
@@ -1216,6 +1340,7 @@ class SidebarApp {
   private handleShortcut = (event: KeyboardEvent): void => {
     if (event.key !== 'Enter' || (!event.metaKey && !event.ctrlKey)) return
     event.preventDefault()
+    if (document.querySelector('dialog[open]')) return
     if (this.runningId) {
       void this.cancelRunningRequest()
       return

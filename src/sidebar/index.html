@@ -16,10 +16,15 @@
           <span>browser<span class="brand-light">curl</span></span>
         </div>
         <div class="header-actions">
+          <button id="new-request" class="history-button" type="button" aria-label="New request" title="Start a new, unsaved request">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+            <span class="header-button-label">New request</span>
+          </button>
           <button id="show-history" class="history-button" type="button" aria-haspopup="dialog" aria-controls="history-dialog" title="View sent requests">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11a9 9 0 1 1 2.6 7M3 4v7h7M12 7v5l3 2" /></svg>
             History
           </button>
+          <button id="show-collections" class="history-button" type="button" aria-haspopup="dialog" aria-controls="collections-dialog" title="View saved collections">Collections</button>
           <button id="open-settings" class="history-button" type="button" aria-label="Settings" title="Open Settings">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></svg>
           </button>
@@ -35,6 +40,8 @@
             <input id="request-name-input" class="request-name-input" aria-label="Request name" maxlength="120" autocomplete="off" hidden />
           </div>
           <div class="workspace-actions">
+            <span id="request-collection" class="draft-label" hidden></span>
+            <select id="env-picker" class="env-picker" aria-label="Collection env" hidden></select>
             <button id="back-to-draft" class="text-button" type="button" hidden>Back to draft</button>
             <span id="workspace-status" class="draft-label" role="status" data-running="false"><span class="running-spinner" aria-hidden="true"></span><span id="workspace-status-label">Draft</span></span>
           </div>
@@ -59,8 +66,11 @@
             <div class="request-actions">
               <span id="url-help" class="url-help">Paste a cURL command to fill in the request.</span>
               <button id="clear-request" class="text-button" type="button" title="Clear the form and visible response. Saved history stays available.">Clear</button>
+              <button id="save-as" class="history-button" type="button" aria-haspopup="dialog" aria-controls="save-as-dialog" hidden>Save as</button>
+              <button id="save-request" class="history-button" type="button">Save</button>
               <button id="send-request" class="send-button" type="submit">Send</button>
             </div>
+            <p id="collection-save-status" class="collection-save-status" role="status" hidden></p>
             <div id="import-notice" class="import-notice" role="status" hidden>
               <div class="import-message">
                 <p id="import-summary"></p>
@@ -117,33 +127,33 @@
                     </div>
                     <div data-auth-type="bearer" class="auth-fields">
                       <label class="field-label" for="bearer-token">Token</label>
-                      <input id="bearer-token" class="auth-input" type="password" placeholder="Enter your access token" autocomplete="off" spellcheck="false" />
+                      <input id="bearer-token" class="auth-input" type="text" placeholder="Enter your access token" autocomplete="off" spellcheck="false" />
                       <p class="help-text">Sent as an Authorization: Bearer header.</p>
                     </div>
                     <div data-auth-type="basic" class="auth-fields" hidden>
                       <label class="field-label" for="basic-username">Username</label>
                       <input id="basic-username" class="auth-input" type="text" placeholder="Username" autocomplete="off" spellcheck="false" />
                       <label class="field-label" for="basic-password">Password</label>
-                      <input id="basic-password" class="auth-input" type="password" placeholder="Password" autocomplete="off" />
+                      <input id="basic-password" class="auth-input" type="text" placeholder="Password" autocomplete="off" />
                       <p class="help-text">Sent as an Authorization: Basic header. Use HTTPS to protect your credentials.</p>
                     </div>
                     <div data-auth-type="api-key" class="auth-fields" hidden>
                       <label class="field-label" for="api-key-name">Key name</label>
                       <input id="api-key-name" class="auth-input" type="text" placeholder="X-API-Key" autocomplete="off" spellcheck="false" />
                       <label class="field-label" for="api-key-value">Value</label>
-                      <input id="api-key-value" class="auth-input" type="password" placeholder="Enter your API key" autocomplete="off" spellcheck="false" />
+                      <input id="api-key-value" class="auth-input" type="text" placeholder="Enter your API key" autocomplete="off" spellcheck="false" />
                       <label class="field-label" for="api-key-location">Add to</label>
                       <select id="api-key-location" class="auth-input"><option value="header">Header</option><option value="query">Query parameters</option></select>
                       <p class="help-text">Query keys appear in the request URL. Use a header if your API supports it.</p>
                     </div>
                     <div data-auth-type="custom" class="auth-fields" hidden>
                       <label class="field-label" for="custom-authorization">Authorization value</label>
-                      <input id="custom-authorization" class="auth-input" type="password" placeholder="Token your-token" autocomplete="off" spellcheck="false" />
+                      <input id="custom-authorization" class="auth-input" type="text" placeholder="Token your-token" autocomplete="off" spellcheck="false" />
                       <p class="help-text">Enter the complete value, including the scheme, such as Token your-token.</p>
                     </div>
                   </div>
                 </div>
-                <p class="help-text">Credentials are saved locally with your draft and sent requests. The selected type overrides matching headers or query parameters.</p>
+                <p class="help-text">Credentials are saved locally with your draft, sent requests, and collections. The selected type overrides matching headers or query parameters.</p>
               </section>
             </div>
           </form>
@@ -194,6 +204,92 @@
       <p id="history-error" class="request-error" role="alert" hidden></p>
       <p id="history-empty" class="history-empty">No sent requests yet. Select Send to save a request here.</p>
       <ul id="history-list" class="history-list" aria-label="Sent requests"></ul>
+    </dialog>
+    <dialog id="collections-dialog" class="history-dialog" aria-labelledby="collections-title" aria-describedby="collections-description">
+      <div class="history-heading">
+        <div><h2 id="collections-title">Collections</h2><p id="collections-description">Named requests, saved on this device.</p></div>
+        <button id="close-collections" class="remove-button" type="button" aria-label="Close collections" title="Close collections" autofocus>×</button>
+      </div>
+      <div class="collections-toolbar">
+        <button id="new-collection" class="history-button" type="button">New collection</button>
+        <button id="import-collection" class="history-button" type="button">Import</button>
+        <input id="collection-file" type="file" accept=".json" aria-label="Postman Collection file" hidden />
+      </div>
+      <form id="collection-item-form" class="collection-item-form" hidden>
+        <label id="collection-item-label" class="field-label" for="collection-item-name">Collection name</label>
+        <input id="collection-item-name" class="auth-input" autocomplete="off" required />
+        <div class="save-as-actions">
+          <button id="cancel-collection-item" class="text-button" type="button">Cancel</button>
+          <button id="confirm-collection-item" class="history-button" type="submit">Create</button>
+        </div>
+      </form>
+      <p id="collections-error" class="request-error" role="alert" hidden></p>
+      <div id="collection-import-notice" class="import-notice" role="status" hidden>
+        <div class="import-message">
+          <p id="collection-import-summary"></p>
+          <p id="collection-import-warning-title" class="import-warning-title">These parts of the collection were dropped:</p>
+          <ul id="collection-import-warnings" class="import-warnings" aria-labelledby="collection-import-warning-title"></ul>
+        </div>
+        <div class="import-actions">
+          <button id="dismiss-collection-import" class="remove-button" type="button" aria-label="Dismiss collection import message" title="Dismiss">×</button>
+        </div>
+      </div>
+      <div id="collection-unsaved-warning" class="collection-unsaved-warning" role="alert" hidden>
+        <p>You have unsaved changes. Discard them and load the selected request?</p>
+        <div class="save-as-actions">
+          <button id="cancel-collection-load" class="text-button" type="button">Cancel</button>
+          <button id="discard-collection-changes" class="history-button" type="button">Discard changes</button>
+        </div>
+      </div>
+      <div id="collection-delete-warning" class="collection-unsaved-warning" role="alert" hidden>
+        <p id="collection-delete-message"></p>
+        <div class="save-as-actions">
+          <button id="cancel-collection-delete" class="text-button" type="button">Cancel</button>
+          <button id="confirm-collection-delete" class="history-button" type="button">Confirm delete</button>
+        </div>
+      </div>
+      <div id="collection-export-warning" class="collection-unsaved-warning" role="alert" hidden>
+        <p id="collection-export-message"></p>
+        <div class="save-as-actions">
+          <button id="cancel-collection-export" class="text-button" type="button">Cancel</button>
+          <button id="confirm-collection-export" class="history-button" type="button">Export</button>
+        </div>
+      </div>
+      <p id="collections-empty" class="history-empty">No collections yet. Use New collection or Import above, or Save as to save a request in a collection.</p>
+      <ul id="collections-list" class="history-list" aria-label="Collections"></ul>
+      <section id="env-editor" class="env-editor" aria-labelledby="env-title" hidden>
+        <div class="history-heading">
+          <div><h2 id="env-title">Environments</h2><p id="env-collection-name"></p></div>
+          <button id="env-close" class="text-button" type="button">Back to collections</button>
+        </div>
+        <p class="help-text">Base lists the names your requests need. Forks keep values on this device. Double-click a fork tab to rename it.</p>
+        <p id="env-inherited" class="env-inherited" hidden></p>
+        <div class="env-tab-bar">
+          <div id="env-tabs" class="env-tabs" role="tablist" aria-label="Environments"></div>
+          <div id="env-tab-actions" class="env-tab-actions"></div>
+        </div>
+        <datalist id="env-fork-suggestions"></datalist>
+        <p id="env-error" class="request-error" role="alert" hidden></p>
+        <div id="env-content" role="tabpanel"></div>
+      </section>
+    </dialog>
+    <dialog id="save-as-dialog" class="history-dialog" aria-labelledby="save-as-title">
+      <div class="history-heading"><div><h2 id="save-as-title">Save request as</h2><p>Keep every editor value in a collection on this device.</p></div></div>
+      <form id="save-as-form" class="save-as-form">
+        <label class="field-label" for="save-request-name">Request name</label>
+        <input id="save-request-name" class="auth-input" autocomplete="off" required autofocus />
+        <label class="field-label" for="save-collection">Collection or folder</label>
+        <select id="save-collection" class="auth-input" required></select>
+        <div id="new-collection-field" hidden>
+          <label class="field-label" for="new-collection-name">New collection name</label>
+          <input id="new-collection-name" class="auth-input" autocomplete="off" />
+        </div>
+        <p id="save-as-error" class="request-error" role="alert" hidden></p>
+        <div class="save-as-actions">
+          <button id="cancel-save-as" class="text-button" type="button">Cancel</button>
+          <button id="confirm-save-as" class="send-button" type="submit">Save request</button>
+        </div>
+      </form>
     </dialog>
     <template id="history-item-template">
       <li class="history-item">
