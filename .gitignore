@@ -45,3 +45,11 @@ extension-env.d.ts
 .claude/screenshots
 
 .playwright/
+
+# Software factory: not mature yet. Keep only the config, which is enough to set it up again.
+.sandcastle/*
+!.sandcastle/factory.config.json
+.agents/skills/factory-*/
+.claude/skills/factory-*
+# Screenshots that evidence runs and e2e tests write.
+.factory-evidence/

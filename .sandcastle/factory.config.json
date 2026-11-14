@@ -1,0 +1,53 @@
+{
+  "tracker": {
+    "type": "github"
+  },
+  "baseBranch": "chore/software-factory-setup",
+  "labels": {
+    "queue": "ready-for-agent",
+    "blocked": "ready-for-human"
+  },
+  "branch": {
+    "defaultPrefix": "feat",
+    "prefixByLabel": {
+      "bug": "bugfix",
+      "refactor": "refactor",
+      "chore": "chore"
+    }
+  },
+  "sandbox": {
+    "type": "native"
+  },
+  "setup": {
+    "installCommand": "npx --yes pnpm@12.4.1 install --frozen-lockfile && PLAYWRIGHT_BROWSERS_PATH=0 node_modules/.bin/playwright install chromium --no-shell",
+    "copyToWorktree": ["node_modules"]
+  },
+  "checks": [
+    { "name": "unit tests", "command": "node --test tests/" },
+    { "name": "build", "command": "node_modules/.bin/extension build" },
+    { "name": "type check", "command": "node_modules/.bin/tsc --noEmit" },
+    { "name": "simulated browser test", "command": "node tests/browser/run.mjs" },
+    { "name": "e2e tests", "command": "PLAYWRIGHT_BROWSERS_PATH=0 node_modules/.bin/playwright test" }
+  ],
+  "agents": {
+    "implementer": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high"
+    },
+    "reviewer": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "xhigh"
+    }
+  },
+  "limits": {
+    "maxParallel": 1,
+    "implementIterations": 5,
+    "fixRounds": 2
+  },
+  "merge": {
+    "mode": "manual",
+    "method": "squash"
+  }
+}

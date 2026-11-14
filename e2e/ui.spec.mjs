@@ -203,3 +203,18 @@ async function pastedCurl({extension, api}) {
   expect(received.url).toBe('/echo?from=paste')
 }
 test('imports a real clipboard paste, restores the earlier draft, and sends the imported request', pastedCurl)
+
+/** Show each credential as plain text, so users can check what they typed. */
+async function visibleCredentials({extension}) {
+  const panel = await extension.openPanel()
+  await click(panel, '#auth-tab')
+  const secretFields = {bearer: '#bearer-token', basic: '#basic-password', 'api-key': '#api-key-value', custom: '#custom-authorization'}
+  for (const [type, selector] of Object.entries(secretFields)) {
+    await panel.locator('#auth-type').selectOption(type)
+    await fill(panel, selector, `${type}-secret`)
+    await expect(panel.locator(selector)).toBeVisible()
+    await expect(panel.locator(selector)).toHaveAttribute('type', 'text')
+  }
+  await expect(panel.locator('input[type="password"]')).toHaveCount(0)
+}
+test('shows credentials as plain text in every auth type', visibleCredentials)
