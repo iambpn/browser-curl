@@ -215,32 +215,6 @@
         <button id="import-collection" class="history-button" type="button">Import</button>
         <input id="collection-file" type="file" accept=".json" aria-label="Postman Collection file" hidden />
       </div>
-      <details class="disk-sync">
-        <summary>Automatic disk sync</summary>
-        <p class="help-text">Back up saved collection changes to a folder you choose. Files use Postman JSON and replace earlier synced copies.</p>
-        <p class="help-text">Save, import, rename, and edits to folders or requests trigger sync. Sending checks saved collections for pending backups. Unsaved request edits stay in the draft. Pending exports continue after the sidebar closes.</p>
-        <p class="help-text">Files contain saved request credentials. Environment values stay on this device. File edits never load into browsercurl.</p>
-        <p class="help-text">Each collection keeps its first sync filename, including after a rename. Deleting a collection keeps its disk file.</p>
-        <p id="disk-sync-unsupported" class="help-text" hidden>Your browser does not support automatic sync to a chosen folder. Use Chrome or Edge, or export collections manually.</p>
-        <form id="disk-sync-form" class="disk-sync-form" inert>
-          <label class="disk-sync-check"><input id="disk-sync-enabled" type="checkbox" /> Enable automatic disk sync</label>
-          <div class="disk-sync-folder">
-            <button id="choose-sync-folder" class="history-button" type="button">Choose folder</button>
-            <span id="disk-sync-folder">No folder selected</span>
-          </div>
-          <label class="field-label" for="disk-sync-scope">Collections to sync</label>
-          <select id="disk-sync-scope" class="auth-input">
-            <option value="all">All collections, including new collections</option>
-            <option value="selected">Selected collections</option>
-          </select>
-          <div id="disk-sync-collections" class="disk-sync-collections" role="group" aria-label="Collections to sync" hidden></div>
-          <p class="help-text">Rapid saved changes share one export. Only changed files are written. Reopening the sidebar retries unfinished backups.</p>
-          <p id="disk-sync-error" class="request-error" role="alert" hidden></p>
-          <button id="save-disk-sync" class="history-button" type="submit">Save sync settings</button>
-        </form>
-        <p id="disk-sync-status" class="help-text" role="status" aria-live="polite"></p>
-        <button id="retry-disk-sync" class="history-button" type="button" hidden>Retry</button>
-      </details>
       <form id="collection-item-form" class="collection-item-form" hidden>
         <label id="collection-item-label" class="field-label" for="collection-item-name">Collection name</label>
         <input id="collection-item-name" class="auth-input" autocomplete="off" required />

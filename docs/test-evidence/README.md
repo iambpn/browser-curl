@@ -1,8 +1,8 @@
 # Saved collection disk sync: recorded test
 
-[Watch the full 2-minute 40-second recording](collection-disk-sync.webm).
+[Watch the full 2-minute 38-second recording](collection-disk-sync.webm).
 
-The continuous recording shows the production Chromium sidebar beside observations read from real extension storage and file streams.
+The continuous recording shows the production Chromium sidebar and Settings page beside observations read from real extension storage and file streams.
 Run sends the current draft. Only explicit Save changes the saved collection request and its disk backup.
 
 ## Checkpoints
@@ -11,13 +11,14 @@ All 17 assertions passed during recording. Times below are approximate.
 
 | Time | Check |
 | --- | --- |
-| 00:00 | Start the real extension with an empty draft. |
-| 00:10 | Save a named request into a collection. |
-| 00:20 | Show that automatic disk sync starts disabled. |
-| 00:28 | Choose the test directory and enable sync. |
+| 00:01 | Start the real extension with an empty draft. |
+| 00:12 | Save a named request into a collection. |
+| 00:20 | Find automatic disk sync in Settings, absent from Collections, disabled by default, with no interval controls. |
+| 00:28 | Choose the test directory and check Enable, without applying those choices until Save sync settings. |
 | 00:36 | Read the first Postman JSON backup from disk. |
-| 00:44 | Run edited draft values while saved and disk values remain unchanged. |
-| 00:56 | Close and reopen the sidebar without promoting the draft into the collection. |
+| 00:45 | Run edited draft values while saved and disk values remain unchanged. |
+| 00:56 | Close the sidebar without promoting the draft into the collection. |
+| 01:01 | Reopen the sidebar and restore the unsaved draft while keeping the saved disk version. |
 | 01:10 | Select Save and verify the new disk contents. |
 | 01:19 | Rename the collection while keeping its original disk filename. |
 | 01:27 | Retry an unchanged export and verify zero file commits. |
@@ -50,7 +51,7 @@ ffmpeg -y -i .playwright/collection-sync-evidence/collection-disk-sync.webm \
 ## Verification limits
 
 - Folder selection returns a real browser-managed directory instead of opening the operating system's native picker.
-- The production sidebar document runs in a test frame. Closing that frame tears down the actual document and exercises background completion.
+- The production sidebar and Settings documents run in separate test frames. Closing the sidebar frame tears down the actual document and exercises background completion.
 - Disk-full errors and a held write are injected in the background and labeled in the recording.
 - The native browser sidebar frame, external-folder permission dialogs, Firefox runtime, and external HTTP services are not covered.
 - The local HTTP server, browser, and temporary browser profile are closed or removed after recording.

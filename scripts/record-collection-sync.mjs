@@ -13,11 +13,11 @@ const output = fileURLToPath(new URL('../.playwright/collection-sync-evidence/',
 /** The production extension used by the walkthrough. Build it before running this script. */
 const extensionPath = fileURLToPath(new URL('../dist/chromium/', import.meta.url))
 
-/** Build an evidence dashboard around the real sidebar document, without changing product markup or scripts. */
+/** Build an evidence dashboard around the real sidebar and Settings documents without changing product markup or scripts. */
 function dashboard(extensionId) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Collection disk sync: test evidence</title>
   <style>
-    *{box-sizing:border-box}body{margin:0;background:#eef1f5;color:#162333;font:15px system-ui,sans-serif}
+    *{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:#eef1f5;color:#162333;font:15px system-ui,sans-serif}
     header{height:120px;padding:18px 24px;background:#142539;color:white}header h1{margin:0 0 7px;font-size:23px}
     header p{margin:0;color:#d1e4f5;font-size:14px}.badge{float:right;padding:6px 10px;background:#30465e;border-radius:6px;font-size:12px}
     main{display:grid;grid-template-columns:620px 1fr;gap:18px;padding:18px;height:840px}
@@ -31,7 +31,7 @@ function dashboard(extensionId) {
   </style></head><body>
     <header><span class="badge">Chromium extension + real file writes</span><h1 id="chapter">Saved-only collection backups</h1>
     <p id="description">Folder selection is simulated with a browser-managed directory. The production sidebar, storage, background, and file streams are real.</p></header>
-    <main><section id="sidebar-host"><iframe id="sidebar" title="Production browsercurl sidebar" src="chrome-extension://${extensionId}/sidebar/index.html"></iframe></section>
+    <main><section id="sidebar-host"><iframe id="sidebar" title="Production browsercurl sidebar" src="chrome-extension://${extensionId}/sidebar/index.html"></iframe><iframe id="settings" title="Production browsercurl Settings" src="chrome-extension://${extensionId}/options/index.html#disk-sync-settings" hidden></iframe></section>
     <aside><section class="card"><h2>Test observation</h2><div id="result">Starting the walkthrough…</div><p id="checks">0 checkpoints passed</p></section>
     <section class="card"><h2>Current draft versus saved data</h2><dl><dt>Current request editor</dt><dd id="draft-url">Loading…</dd><dt>Saved collection request</dt><dd id="saved-url">No collection yet</dd><dt>Request in the disk file</dt><dd id="disk-url">No file yet</dd><dt>Collection name on disk</dt><dd id="disk-name">No file yet</dd></dl></section>
     <section class="card"><h2>Actual Postman JSON read from disk</h2><p id="file-name">No backup yet</p><pre id="file-json">Choose a folder and enable automatic sync.</pre></section></aside></main>
@@ -105,6 +105,7 @@ async function main() {
     await expect(page.locator('#settings-form')).not.toHaveAttribute('inert', '')
     await page.setContent(dashboard(extensionId))
     let frame = await sidebarReady(page)
+    const settingsFrame = page.frameLocator('#settings')
 
     /** Show the next test action before operating the real UI. */
     async function caption(title, description) {
@@ -152,15 +153,32 @@ async function main() {
       return data.disk?.info?.name
     }
 
-    /** Open the saved collection controls in the current sidebar document. */
+    /** Show the actual sidebar while retaining the separate Settings document. */
+    async function showSidebar() {
+      /** Switch the test viewer without replacing or modifying either production page. */
+      function show() {
+        document.querySelector('#sidebar').hidden = false
+        document.querySelector('#settings').hidden = true
+      }
+      await page.evaluate(show)
+    }
+
+    /** Show the production Settings page with the automatic sync section in view. */
     async function openSync() {
-      await frame.locator('#show-collections').click()
-      await frame.locator('.disk-sync summary').click()
-      await expect(frame.locator('#disk-sync-form')).not.toHaveAttribute('inert', '')
+      /** Display the separate Settings document in the test viewer. */
+      function show() {
+        document.querySelector('#sidebar').hidden = true
+        document.querySelector('#settings').hidden = false
+      }
+      await page.evaluate(show)
+      await expect(settingsFrame.locator('#disk-sync-form')).not.toHaveAttribute('inert', '')
+      await settingsFrame.locator('#disk-sync-title').scrollIntoViewIfNeeded()
     }
 
     /** Rename a real collection through its normal inline editor. */
     async function rename(name, replacement) {
+      await showSidebar()
+      if (!await frame.locator('#collections-dialog').isVisible()) await frame.locator('#show-collections').click()
       const label = frame.locator('[data-collection-name]', {hasText: name})
       const rows = frame.locator('.collection-row')
       const row = rows.filter({has: label})
@@ -185,10 +203,11 @@ async function main() {
     await expect(frame.locator('#save-as-dialog')).toBeHidden()
     await checkpoint('A named request now exists in the saved collection.')
 
-    await caption('03 / Choose which collections to back up', 'Automatic sync is off by default. This walkthrough enables all collections in a user-approved test directory.')
+    await caption('03 / Settings → Automatic disk sync', 'Automatic sync is off by default. This walkthrough enables all collections in a user-approved test directory.')
     await openSync()
-    await expect(frame.locator('#disk-sync-enabled')).not.toBeChecked()
-    await checkpoint('Sync is opt-in. No interval controls are present.')
+    await expect(frame.locator('#disk-sync-form')).toHaveCount(0)
+    await expect(settingsFrame.locator('#disk-sync-enabled')).not.toBeChecked()
+    await checkpoint('Sync settings live on the Settings page. Sync starts off and has no interval controls.')
 
     /** Substitute only the native picker; the returned directory and file streams are real. */
     async function installPicker() {
@@ -198,20 +217,20 @@ async function main() {
         return root.getDirectoryHandle('browsercurl-backups', {create: true})
       }
     }
-    await frame.locator('body').evaluate(installPicker)
-    await frame.locator('#choose-sync-folder').click()
-    await frame.locator('#disk-sync-enabled').check()
+    await settingsFrame.locator('body').evaluate(installPicker)
+    await settingsFrame.locator('#choose-sync-folder').click()
+    await settingsFrame.locator('#disk-sync-enabled').check()
     await checkpoint('The selected test directory is visible. Changes are not enabled until Save sync settings.')
 
     await caption('04 / Enable automatic disk sync', 'The first backup writes the saved collection as Postman JSON. The right panel reads that actual file.')
-    await frame.locator('#save-disk-sync').click()
+    await settingsFrame.locator('#save-disk-sync').click()
     await expect.poll(diskUrl).toBe(`${api.origin}/echo?version=saved`)
     const first = await page.evaluate(observe)
     const originalFileName = first.files[0].name
     await checkpoint('The initial disk JSON contains the saved request.')
 
     await caption('05 / Run an edited draft', 'The HTTP request uses the edited URL. The saved collection and disk backup retain the earlier saved URL.')
-    await frame.locator('#close-collections').click()
+    await showSidebar()
     await frame.locator('#request-url').fill(`${api.origin}/echo?version=draft`)
     await frame.locator('#send-request').click()
     await expect(frame.locator('#response-stats')).toBeVisible()
@@ -227,6 +246,7 @@ async function main() {
     /** Tear down the actual sidebar document while leaving the evidence viewer alive. */
     function closeSidebar() {
       document.querySelector('#sidebar').remove()
+      document.querySelector('#settings').hidden = true
       const message = document.createElement('div')
       message.id = 'closed'
       message.textContent = 'Sidebar closed. The background remains available and the draft stays in browser storage.'
@@ -240,7 +260,9 @@ async function main() {
       iframe.id = 'sidebar'
       iframe.title = 'Production browsercurl sidebar'
       iframe.src = `chrome-extension://${extensionId}/sidebar/index.html`
-      document.querySelector('#sidebar-host').replaceChildren(iframe)
+      document.querySelector('#closed')?.remove()
+      document.querySelector('#settings').hidden = true
+      document.querySelector('#sidebar-host').append(iframe)
     }
     await page.evaluate(reopenSidebar, extensionId)
     frame = await sidebarReady(page)
@@ -273,25 +295,27 @@ async function main() {
       }
     }
     await worker.evaluate(countWrites)
-    await frame.locator('#retry-disk-sync').click()
-    await expect(frame.locator('#disk-sync-status')).toContainText('Last synced:')
+    await openSync()
+    await settingsFrame.locator('#retry-disk-sync').click()
+    await expect(settingsFrame.locator('#disk-sync-status')).toContainText('Last synced:')
     /** Read the native commit counter for the unchanged export check. */
     function writeCount() { return globalThis.evidenceWrites }
     assert.equal(await worker.evaluate(writeCount), 0)
     await checkpoint('Retry checked the saved collection and performed zero file commits.')
 
     await caption('10 / Disable automatic backups', 'An explicit settings change pauses backups. Collection edits remain safely saved in the browser.')
-    await frame.locator('#disk-sync-enabled').uncheck()
-    await frame.locator('#save-disk-sync').click()
-    await expect(frame.locator('#disk-sync-status')).toHaveText('Automatic disk sync is off.')
+    await settingsFrame.locator('#disk-sync-enabled').uncheck()
+    await settingsFrame.locator('#save-disk-sync').click()
+    await expect(settingsFrame.locator('#disk-sync-status')).toHaveText('Automatic disk sync is off.')
     await rename('Renamed Widget API', 'Paused Widget API')
     await pause(1200)
     assert.equal(await diskName(), 'Renamed Widget API')
     await checkpoint('The browser collection changed while the disabled disk backup stayed unchanged.')
 
     await caption('11 / Re-enable and catch up', 'Re-enabling uses the same approved directory and original filename to back up the saved changes.')
-    await frame.locator('#disk-sync-enabled').check()
-    await frame.locator('#save-disk-sync').click()
+    await openSync()
+    await settingsFrame.locator('#disk-sync-enabled').check()
+    await settingsFrame.locator('#save-disk-sync').click()
     await expect.poll(diskName).toBe('Paused Widget API')
     await checkpoint('The paused saved changes reached the existing disk file.')
 
@@ -311,7 +335,8 @@ async function main() {
     }
     await worker.evaluate(injectFailure)
     await rename('Paused Widget API', 'Recovered Widget API')
-    await expect(frame.locator('#disk-sync-status')).toContainText('Sync failed.')
+    await openSync()
+    await expect(settingsFrame.locator('#disk-sync-status')).toContainText('Sync failed.')
     assert.equal(await diskName(), 'Paused Widget API')
     await checkpoint('The failure is visible and the previous complete disk JSON remains intact.', 10000)
     await screenshot('write-failure.png')
@@ -320,7 +345,7 @@ async function main() {
     /** Restore successful writes while retaining the failed revision for the normal retry path. */
     function restoreWrites() { globalThis.evidenceFailWrites = false }
     await worker.evaluate(restoreWrites)
-    await frame.locator('#retry-disk-sync').click()
+    await settingsFrame.locator('#retry-disk-sync').click()
     await expect.poll(diskName).toBe('Recovered Widget API')
     await checkpoint('Retry recovered the latest saved collection using the same disk file.')
 
@@ -356,11 +381,11 @@ async function main() {
     await checkpoint('The background completed the export after the sidebar document closed.', 10000)
     await screenshot('background-completion.png')
 
-    await caption('15 / Final saved-only backup checks', 'Reopening restores the saved request. The backup is current, complete, and still uses its original filename.')
+    await caption('15 / Final saved-only backup checks', 'Reopening preserves the saved request. Settings shows a current backup using its original filename.')
     await page.evaluate(reopenSidebar, extensionId)
     frame = await sidebarReady(page)
     await openSync()
-    await expect(frame.locator('#disk-sync-status')).toContainText('Last synced:')
+    await expect(settingsFrame.locator('#disk-sync-status')).toContainText('Last synced:')
     const final = await page.evaluate(observe)
     assert.equal(final.files.length, 1)
     assert.equal(final.files[0].name, originalFileName)
@@ -376,7 +401,7 @@ async function main() {
     const elapsedMs = Date.now() - startedAt
     const elapsedSeconds = Math.round(elapsedMs / 1000)
     const manifest = {videoPath, elapsedSeconds,
-      limits: ['Native directory picker simulated with OPFS.', 'Production sidebar document hosted in a test iframe.',
+      limits: ['Native directory picker simulated with OPFS.', 'Production sidebar and Settings documents hosted in test iframes.',
         'Disk-full and held-write failures injected explicitly.', 'Native browser sidebar frame and Firefox runtime not covered.'],
       checkpoints}
     const manifestPath = join(output, 'manifest.json')

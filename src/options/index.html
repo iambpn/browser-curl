@@ -15,24 +15,54 @@
         <span>browser<span class="brand-light">curl</span></span>
       </header>
       <h1>Settings</h1>
-      <p class="settings-intro">Size limits for response bodies. 1 MB is 1,024 KB. New requests use the saved values.</p>
-      <form id="settings-form" class="settings-form" inert>
-        <div class="setting">
-          <label for="max-response-mb">Maximum response size (MB)</label>
-          <input id="max-response-mb" name="maxResponseMb" type="number" step="0.1" required aria-describedby="max-response-mb-hint" />
-          <p class="setting-hint" id="max-response-mb-hint">The extension stops reading a response body at this size. The panel then shows only the first part of the body.</p>
-        </div>
-        <div class="setting">
-          <label for="history-body-limit-mb">History body limit (MB)</label>
-          <input id="history-body-limit-mb" name="historyBodyLimitMb" type="number" step="0.1" required aria-describedby="history-body-limit-mb-hint" />
-          <p class="setting-hint" id="history-body-limit-mb-hint">History saves a response body only if the body is this size or smaller. For a larger body, history saves the request, status, and headers without the body. Enter 0 to never save response bodies.</p>
-        </div>
-        <div class="settings-actions">
-          <button id="save-settings" class="primary-button" type="submit">Save</button>
-          <button id="reset-settings" class="secondary-button" type="button">Use defaults</button>
-        </div>
-      </form>
-      <p id="settings-status" class="settings-status" role="status" aria-live="polite"></p>
+      <p class="settings-intro">Manage response limits and collection backups.</p>
+      <section class="settings-section" aria-labelledby="response-limits-title">
+        <h2 id="response-limits-title">Response limits</h2>
+        <p class="setting-hint section-intro">1 MB is 1,024 KB. New requests use the saved values.</p>
+        <form id="settings-form" class="settings-form" inert>
+          <div class="setting">
+            <label for="max-response-mb">Maximum response size (MB)</label>
+            <input id="max-response-mb" name="maxResponseMb" type="number" step="0.1" required aria-describedby="max-response-mb-hint" />
+            <p class="setting-hint" id="max-response-mb-hint">The extension stops reading a response body at this size. The panel then shows only the first part of the body.</p>
+          </div>
+          <div class="setting">
+            <label for="history-body-limit-mb">History body limit (MB)</label>
+            <input id="history-body-limit-mb" name="historyBodyLimitMb" type="number" step="0.1" required aria-describedby="history-body-limit-mb-hint" />
+            <p class="setting-hint" id="history-body-limit-mb-hint">History saves a response body only if the body is this size or smaller. For a larger body, history saves the request, status, and headers without the body. Enter 0 to never save response bodies.</p>
+          </div>
+          <div class="settings-actions">
+            <button id="save-settings" class="primary-button" type="submit">Save</button>
+            <button id="reset-settings" class="secondary-button" type="button">Use defaults</button>
+          </div>
+        </form>
+        <p id="settings-status" class="settings-status" role="status" aria-live="polite"></p>
+      </section>
+      <section id="disk-sync-settings" class="settings-section disk-sync" aria-labelledby="disk-sync-title">
+        <h2 id="disk-sync-title">Automatic disk sync</h2>
+        <p class="setting-hint">Back up saved collection changes to a folder you choose. Files use Postman JSON and replace earlier synced copies.</p>
+        <p class="setting-hint">Save, import, rename, and edits to folders or requests trigger sync. Sending checks saved collections for pending backups. Unsaved request edits stay in the draft. Pending exports continue after the sidebar closes.</p>
+        <p class="setting-hint">Files contain saved request credentials. Environment values stay on this device. File edits never load into browsercurl.</p>
+        <p class="setting-hint">Each collection keeps its first sync filename, including after a rename. Deleting a collection keeps its disk file.</p>
+        <p id="disk-sync-unsupported" class="setting-hint" hidden>Your browser does not support automatic sync to a chosen folder. Use Chrome or Edge, or export collections manually.</p>
+        <form id="disk-sync-form" class="settings-form disk-sync-form" inert>
+          <label class="disk-sync-check"><input id="disk-sync-enabled" type="checkbox" /> Enable automatic disk sync</label>
+          <div class="disk-sync-folder">
+            <button id="choose-sync-folder" class="secondary-button" type="button">Choose folder</button>
+            <span id="disk-sync-folder">No folder selected</span>
+          </div>
+          <label class="setting-label" for="disk-sync-scope">Collections to sync</label>
+          <select id="disk-sync-scope" class="sync-input">
+            <option value="all">All collections, including new collections</option>
+            <option value="selected">Selected collections</option>
+          </select>
+          <div id="disk-sync-collections" class="disk-sync-collections" role="group" aria-label="Collections to sync" hidden></div>
+          <p class="setting-hint">Rapid saved changes share one export. Only changed files are written. Reopening the sidebar retries unfinished backups.</p>
+          <p id="disk-sync-error" class="request-error" role="alert" hidden></p>
+          <button id="save-disk-sync" class="primary-button" type="submit">Save sync settings</button>
+        </form>
+        <p id="disk-sync-status" class="setting-hint" role="status" aria-live="polite"></p>
+        <button id="retry-disk-sync" class="secondary-button" type="button" hidden>Retry</button>
+      </section>
     </main>
     <script type="module" src="./scripts.ts"></script>
   </body>

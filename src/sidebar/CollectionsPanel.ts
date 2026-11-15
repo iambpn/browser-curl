@@ -8,7 +8,6 @@ import type {CollectionRequestLink, EditorState} from '../history/request-state'
 import {resolveRequestName} from '../history/request-state'
 import {importPostmanCollection} from '../collections/postman-converter'
 import {EnvironmentsEditor} from './EnvironmentsEditor'
-import {DiskSyncPanel} from './DiskSyncPanel'
 
 /** Find a required control in the sidebar's static markup. */
 function element<T extends HTMLElement>(selector: string): T {
@@ -101,7 +100,7 @@ export class CollectionsPanel {
   private statusTimer: ReturnType<typeof setTimeout> | undefined
   private disposed = false
 
-  /** Connect collection actions and start the sidebar's automatic disk sync controls. */
+  /** Connect collection browsing, import, export, and editor save actions. */
   constructor(
     private readEditor: () => EditorState,
     private openEditor: (editor: EditorState, link: CollectionRequestLink) => void,
@@ -109,7 +108,6 @@ export class CollectionsPanel {
     private linkEditor: (link: CollectionRequestLink, name?: string) => void,
     private readEditorRevision: () => number
   ) {
-    new DiskSyncPanel()
     element('#show-collections').addEventListener('click', this.show)
     element('#close-collections').addEventListener('click', () => this.dialog.close())
     element('#save-as').addEventListener('click', this.showSaveAs)

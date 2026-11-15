@@ -5,7 +5,7 @@ import type {DiskSyncSettings} from '../collections/disk-sync'
 import {loadSyncDirectory, saveSyncDirectory} from '../collections/sync-directory'
 import type {SyncDirectory} from '../collections/sync-directory'
 
-/** Find a sync control in the sidebar's static markup. */
+/** Find a sync control in the Settings page's static markup. */
 function control<T extends HTMLElement>(selector: string): T {
   const node = document.querySelector<T>(selector)
   if (!node) throw new Error(`Missing disk sync control: ${selector}`)
@@ -19,7 +19,7 @@ type DirectoryPickerWindow = Window & {
 }
 
 /** Configure all collections or a selected set without changing the collection editor. */
-export class DiskSyncPanel {
+export class DiskSyncSettingsPanel {
   private form = control<HTMLFormElement>('#disk-sync-form')
   private enabled = control<HTMLInputElement>('#disk-sync-enabled')
   private scope = control<HTMLSelectElement>('#disk-sync-scope')
@@ -74,7 +74,7 @@ export class DiskSyncPanel {
       this.showStatus(settings)
       if (settings?.enabled) void this.retry()
     } catch {
-      this.showError('Could not load sync settings. Close and reopen the sidebar to try again.')
+      this.showError('Could not load sync settings. Reload this Settings page to try again.')
     }
   }
 
@@ -221,7 +221,7 @@ export class DiskSyncPanel {
 
   /** Keep a failed list refresh visible instead of silently dropping selection choices. */
   private reportCollectionError = (): void => {
-    this.showError('Could not refresh collections. Close and reopen the sidebar to try again.')
+    this.showError('Could not refresh collections. Reload this Settings page to try again.')
   }
 
   /** Show progress-storage failures that the background could not save to extension storage. */
@@ -232,14 +232,10 @@ export class DiskSyncPanel {
     this.status.textContent = 'Sync failed. Could not read or save sync progress. Select Retry to try again.'
   }
 
-  /** Request a final background check, then detach this sidebar's listeners without canceling disk writes. */
+  /** Detach Settings page listeners without canceling background exports. */
   private dispose = (): void => {
-    if (this.settings?.enabled) void requestDiskSync().catch(this.ignoreClosedPage)
     this.disposed = true
     chrome.storage.onChanged.removeListener(this.storageChanged)
     chrome.runtime.onMessage.removeListener(this.handleSyncFailure)
   }
-
-  /** A closing document cannot show errors; saved changes remain available for the next background check. */
-  private ignoreClosedPage = (): void => {}
 }

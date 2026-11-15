@@ -259,6 +259,7 @@ class SidebarApp {
     )
     element<HTMLSelectElement>('#env-picker').addEventListener('change', this.chooseEnv)
     void this.restoreWorkspace()
+    void requestDiskSync().catch(this.reportDiskSyncFailure)
   }
 
   /** Restore the last editor and response before enabling input, so startup cannot overwrite a newer draft. */
@@ -1353,9 +1354,10 @@ class SidebarApp {
     this.form.requestSubmit()
   }
 
-  /** Save the draft and resize preference, and detach panel listeners while background requests continue. */
+  /** Preserve the draft, check pending backups, and detach listeners while background work continues. */
   private dispose = (): void => {
     this.persistWorkspace()
+    void requestDiskSync().catch(this.reportDiskSyncFailure)
     this.disposed = true
     if (this.resizeStart) this.rememberResponseHeight()
     chrome.storage.onChanged.removeListener(this.handleStorageChange)

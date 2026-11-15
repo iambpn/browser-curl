@@ -121,7 +121,7 @@ Select the gear button to change response limits. Select **Clear** to empty the 
 
 ### Automatic disk sync
 
-In Chrome or Edge, open **Collections → Automatic disk sync**. Choose a folder, enable sync, and select all collections or specific collections.
+In Chrome or Edge, open **Settings → Automatic disk sync**. Choose a folder, enable sync, and select all collections or specific collections.
 Select **Save sync settings**. Sync backs up saved collection changes automatically, without a repeating timer.
 
 Save, import, rename, and changes to folders or saved requests trigger sync. Rapid saved changes share one export after a short pause.
@@ -343,7 +343,7 @@ node scripts/record-collection-sync.mjs
 ```
 
 The recording and timestamped assertions are written to `.playwright/collection-sync-evidence/`.
-The walkthrough uses the production sidebar in a test frame and real file streams. It labels simulated folder selection and injected disk failures.
+The walkthrough uses the production sidebar and Settings pages in test frames with real file streams. It labels simulated folder selection and injected disk failures.
 See [the recorded walkthrough](docs/test-evidence/README.md) for the video, checkpoints, and verification limits.
 
 ### Source layout
