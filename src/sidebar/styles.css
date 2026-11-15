@@ -12,6 +12,65 @@
   --text: #30333a;
 }
 
+.env-suggestions {
+  position: fixed;
+  z-index: 20;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 5px 20px #0002;
+}
+
+.env-suggestion {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.env-suggestion:hover,
+.env-suggestion[aria-selected='true'] {
+  background: var(--canvas);
+  box-shadow: inset 2px 0 var(--accent);
+}
+
+.env-suggestion .collection-kind-icon {
+  flex: 0 0 25px;
+  margin: 0;
+  text-align: center;
+  font-size: 13px;
+}
+
+.env-suggestion .history-method {
+  font-size: 9px;
+}
+
+.env-suggestion-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.env-suggestion-name {
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.env-suggestion-source {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .env-picker {
   max-width: 140px;
   border: 1px solid var(--line);
@@ -765,6 +824,22 @@ main {
   justify-content: flex-end;
   align-items: center;
   gap: 18px;
+}
+
+.save-as-form .new-request-picker {
+  min-height: 190px;
+  padding: 6px;
+  font-size: 13px;
+}
+
+.new-request-picker option {
+  min-height: 28px;
+  padding: 5px 8px;
+  line-height: 1.4;
+}
+
+.destination-root {
+  font-weight: 650;
 }
 
 .collection-save-status {

@@ -21,9 +21,16 @@ export interface CollectionRequestLink {
   requestId: string
 }
 
+/** A chosen collection or folder for a new request that has not been saved there yet. */
+export interface CollectionDestination {
+  collectionId: string
+  folderId?: string
+}
+
 /** Send-only provenance travels with the editor snapshot through the unchanged HTTP runner. */
 export interface SentEditorState extends EditorState {
   collectionRequest?: CollectionRequestLink
+  collectionDestination?: CollectionDestination
 }
 
 /** An editor snapshot, its collection destination, and the saved send whose result the panel displays. */
@@ -31,6 +38,7 @@ export interface PanelSnapshot {
   editor: EditorState
   responseId?: string
   collectionRequest?: CollectionRequestLink
+  collectionDestination?: CollectionDestination
   /** Origin used only for resolution; a history preview has no collection Save target. */
   historySource?: CollectionRequestLink
 }
@@ -48,6 +56,8 @@ export interface SavedRequest {
   sentAt: number
   editor: EditorState
   collectionRequest?: CollectionRequestLink
+  /** Resolve an unsaved send from its chosen collection or folder when reopening history. */
+  collectionDestination?: CollectionDestination
   request: HttpRequestPayload
   result?: HttpResultMessage
 }

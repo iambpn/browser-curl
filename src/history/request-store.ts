@@ -74,9 +74,11 @@ export async function listHistorySummaries(): Promise<HistorySummary[]> {
 export function createSavedRequest(request: SavedRequest & {editor: SentEditorState}): Promise<void> {
   // Keep provenance on the history entry, separate from reusable editor values and the sent payload.
   // The HTTP runner already forwards the complete editor snapshot, so it needs no env behavior.
-  if (request.editor.collectionRequest) {
-    const {collectionRequest, ...editor} = request.editor
-    request = {...request, editor, collectionRequest}
+  if (request.editor.collectionRequest || request.editor.collectionDestination) {
+    const {collectionRequest, collectionDestination, ...editor} = request.editor
+    request = {...request, editor}
+    if (collectionRequest) request.collectionRequest = collectionRequest
+    if (collectionDestination) request.collectionDestination = collectionDestination
   }
   /** Add this request as a distinct send attempt, and remove the requests that no longer fit. */
   async function create(): Promise<void> {

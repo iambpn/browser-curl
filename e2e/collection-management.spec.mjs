@@ -32,7 +32,8 @@ async function saveIn(panel, name, destination, evidenceName) {
   await expectHidden(panel, '#save-as-dialog')
 }
 
-test('creates nested folders, saves inside them, preserves order and depth after restart, and expands and collapses', async ({extension, api}) => {
+/** Verify collection and folder choices preserve tree order, shared icons, and saved requests after restart. */
+async function nestedFolderDestinations({extension, api}) {
   let panel = await extension.openPanel()
   await click(panel, '#show-collections')
   await expect(panel.locator('#collections-empty')).toContainText('New collection')
@@ -43,12 +44,12 @@ test('creates nested folders, saves inside them, preserves order and depth after
   await click(panel, '#close-collections')
   await fill(panel, '#request-url', `${api.origin}/echo`)
   await saveIn(panel, 'Nested request', folderOption('Outer', 'Inner'))
-  await saveIn(panel, 'Root request', '\u{1F4DA} API (root)')
+  await saveIn(panel, 'Root request', '\u{1F4DA} API')
   await saveIn(panel, 'Outer request', folderOption('Outer'))
   await click(panel, '#show-collections')
   await create(panel, 'Last folder', 'API')
   await click(panel, '#close-collections')
-  await saveIn(panel, 'Last request', '\u{1F4DA} API (root)')
+  await saveIn(panel, 'Last request', '\u{1F4DA} API')
   await extension.restart()
   panel = await extension.openPanel()
   await click(panel, '#show-collections')
@@ -62,7 +63,7 @@ test('creates nested folders, saves inside them, preserves order and depth after
   const icons = await panel.locator('.collection-row').evaluateAll((rows) => rows.map((row) => {
     return row.querySelector('.collection-kind-icon')?.textContent ?? ''
   }))
-  expect(icons).toEqual(['\u{1F4DA}', '\u{1F4C1}', '\u{1F4C1}', '', '', '', '\u{1F4C1}', ''])
+  expect(icons).toEqual(['\u{1F4DA}', '\u{1F4C1}', '\u{1F4C1}', 'GET', 'GET', 'GET', '\u{1F4C1}', 'GET'])
   await proof(panel, 'nested-folders-after-restart')
   await panel.emulateMedia({colorScheme: 'dark'})
   await proof(panel, 'nested-folders-dark-mode')
@@ -78,7 +79,8 @@ test('creates nested folders, saves inside them, preserves order and depth after
   await row(panel, 'Nested request').locator('[data-open-collection-request]').click()
   await expectHidden(panel, '#collections-dialog')
   await expectValue(panel, '#request-url', `${api.origin}/echo`)
-})
+}
+test('creates nested folders, saves inside them, preserves order and depth after restart, and expands and collapses', nestedFolderDestinations)
 
 async function rename(panel, oldName, newName, key = 'Enter') {
   await row(panel, oldName).getByRole('button', {name: 'Rename', exact: true}).click()
@@ -136,7 +138,8 @@ test('renames the linked nested request from the editor heading when Save is sel
   expect(saved.collections[0].requests[0].requests[0].editor.name).toBe('Heading name')
 })
 
-test('deletes requests immediately, confirms recursive deletion, and deletes empty containers without confirmation', async ({extension, api}) => {
+/** Verify requests saved in root and folder destinations retain the expected deletion behavior. */
+async function deleteDestinationItems({extension, api}) {
   const panel = await extension.openPanel()
   panel.on('dialog', () => { throw new Error('Browser dialogs must never be used for collections') })
   await click(panel, '#show-collections')
@@ -148,7 +151,7 @@ test('deletes requests immediately, confirms recursive deletion, and deletes emp
   await click(panel, '#close-collections')
   await fill(panel, '#request-url', `${api.origin}/echo`)
   await saveIn(panel, 'Keep until confirmed', folderOption('Outer', 'Inner'))
-  await saveIn(panel, 'Delete immediately', '\u{1F4DA} API (root)')
+  await saveIn(panel, 'Delete immediately', '\u{1F4DA} API')
   await click(panel, '#show-collections')
   await expect(row(panel, 'Delete immediately').getByRole('button', {name: 'Delete', exact: true})).toBeVisible()
   await row(panel, 'Delete immediately').getByRole('button', {name: 'Delete', exact: true}).click()
@@ -178,7 +181,8 @@ test('deletes requests immediately, confirms recursive deletion, and deletes emp
   expect(remaining.collections.map(c => c.name)).toEqual(['API'])
   expect(remaining.collections[0].requests).toEqual([])
   await proof(panel, 'recursive-delete-and-empty-collection-removed')
-})
+}
+test('deletes requests immediately, confirms recursive deletion, and deletes empty containers without confirmation', deleteDestinationItems)
 
 test('deleting the displayed request keeps all editor values and makes Save open Save as', async ({extension, api}) => {
   const panel = await extension.openPanel()
@@ -280,20 +284,21 @@ for (const populated of [false, true]) {
   })
 }
 
-test('keeps another panel and its folder picker current after creating, renaming, and deleting folders', async ({extension, api}) => {
+/** Keep a selected destination current across folder edits in another panel. */
+async function refreshFolderDestinations({extension, api}) {
   const first = await extension.openPanel()
   await click(first, '#show-collections')
   await create(first, 'API')
   const second = await extension.openPanel()
   await fill(second, '#request-url', `${api.origin}/echo`)
   await click(second, '#save-request')
-  await expect(second.locator('#save-collection option')).toHaveText(['\u{1F4DA} API (root)', '\uff0b New collection'])
+  await expect(second.locator('#save-collection option')).toHaveText(['\u{1F4DA} API', '\uff0b New collection'])
   await create(first, 'Folder', 'API')
-  await expect(second.locator('#save-collection option')).toHaveText(['\u{1F4DA} API (root)', folderOption('Folder'), '\uff0b New collection'])
+  await expect(second.locator('#save-collection option')).toHaveText(['\u{1F4DA} API', folderOption('Folder'), '\uff0b New collection'])
   await second.locator('#save-collection').selectOption({label: folderOption('Folder')})
   const selected = await second.locator('#save-collection').inputValue()
   await rename(first, 'Folder', 'Renamed folder')
-  await expect(second.locator('#save-collection option')).toHaveText(['\u{1F4DA} API (root)', folderOption('Renamed folder'), '\uff0b New collection'])
+  await expect(second.locator('#save-collection option')).toHaveText(['\u{1F4DA} API', folderOption('Renamed folder'), '\uff0b New collection'])
   await expect(second.locator('#save-collection')).toHaveValue(selected)
   await click(second, '#cancel-save-as')
   await click(second, '#show-collections')
@@ -301,7 +306,8 @@ test('keeps another panel and its folder picker current after creating, renaming
   await row(first, 'Renamed folder').getByRole('button', {name: 'Delete', exact: true}).click()
   await expect(row(second, 'Renamed folder')).toHaveCount(0)
   await proof(second, 'folder-changes-update-another-panel')
-})
+}
+test('keeps another panel and its folder picker current after creating, renaming, and deleting folders', refreshFolderDestinations)
 
 test('keeps names and controls usable through fourteen folder levels in a narrow panel', async ({extension, api}) => {
   let panel = await extension.openPanel()

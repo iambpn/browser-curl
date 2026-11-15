@@ -16,7 +16,7 @@
           <span>browser<span class="brand-light">curl</span></span>
         </div>
         <div class="header-actions">
-          <button id="new-request" class="history-button" type="button" aria-label="New request" title="Start a new, unsaved request">
+          <button id="new-request" class="history-button" type="button" aria-label="New request" title="Start a new, unsaved request" aria-haspopup="dialog" aria-controls="new-request-dialog">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
             <span class="header-button-label">New request</span>
           </button>
@@ -272,6 +272,18 @@
         <p id="env-error" class="request-error" role="alert" hidden></p>
         <div id="env-content" role="tabpanel"></div>
       </section>
+    </dialog>
+    <dialog id="new-request-dialog" class="history-dialog" aria-labelledby="new-request-title" aria-describedby="new-request-description">
+      <div class="history-heading"><div><h2 id="new-request-title">New request</h2><p id="new-request-description">Choose a collection or folder. The request stays unsaved until you save it.</p></div></div>
+      <form id="new-request-form" class="save-as-form">
+        <label class="field-label" for="new-request-collection">Collection or folder</label>
+        <select id="new-request-collection" class="auth-input new-request-picker" size="6" required autofocus></select>
+        <p id="new-request-error" class="request-error" role="alert" hidden></p>
+        <div class="save-as-actions">
+          <button id="cancel-new-request" class="text-button" type="button">Cancel</button>
+          <button id="confirm-new-request" class="send-button" type="submit">Continue</button>
+        </div>
+      </form>
     </dialog>
     <dialog id="save-as-dialog" class="history-dialog" aria-labelledby="save-as-title">
       <div class="history-heading"><div><h2 id="save-as-title">Save request as</h2><p>Keep every editor value in a collection on this device.</p></div></div>

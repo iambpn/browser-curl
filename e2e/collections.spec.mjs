@@ -244,7 +244,8 @@ for (const destination of ['existing', 'new']) {
 
 /** Let another panel update the picker while a save waits for the collection write lock. */
 for (const outcome of ['accepted', 'rejected']) {
-  test(`blocks duplicate submission during a picker refresh until a pending save is ${outcome}`, async ({extension, api}) => {
+  /** Preserve the pending save and selected destination while another panel refreshes the available collections. */
+  async function pendingSaveDuringRefresh({extension, api}) {
     const first = await extension.openPanel()
     await fill(first, '#request-url', `${api.origin}/echo`)
     await saveAs(first, 'Seed request', 'Shared collection')
@@ -285,7 +286,7 @@ for (const outcome of ['accepted', 'rejected']) {
     await expect(first.locator('#confirm-save-as')).toBeDisabled()
     await second.evaluate(() => window.commitCollectionWrite())
     await second.waitForFunction(() => typeof window.finishCollectionWrite === 'function')
-    await expect(first.locator('#save-collection option')).toHaveText(['\u{1F4DA} Shared collection (root)', '\u{1F4DA} Other collection (root)', '\uff0b New collection'])
+    await expect(first.locator('#save-collection option')).toHaveText(['\u{1F4DA} Shared collection', '\u{1F4DA} Other collection', '\uff0b New collection'])
     await expect.soft(first.locator('#confirm-save-as')).toBeDisabled()
     await captureEvidence(first, `pending-save-${outcome}`)
     // Exercise both button clicks and form submission while the original save is still pending.
@@ -321,7 +322,8 @@ for (const outcome of ['accepted', 'rejected']) {
       await expect(first.locator('[data-collection-request-name]')).toHaveText(['Seed request', 'Pending request', 'Other request'])
       await captureEvidence(first, 'collections-after-save-retry')
     }
-  })
+  }
+  test(`blocks duplicate submission during a picker refresh until a pending save is ${outcome}`, pendingSaveDuringRefresh)
 }
 
 /** Cancel without writing, and reject whitespace-only names without losing entered editor values. */

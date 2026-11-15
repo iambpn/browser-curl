@@ -11,6 +11,11 @@ export async function click(page, selector) {
   await page.locator(selector).click()
 }
 
+/** Choose a collection, folder, or No collection in the new request's native list. */
+export async function chooseNewRequestDestination(page, value) {
+  await page.locator('#new-request-collection').selectOption(value)
+}
+
 /** Compare the current value of a real form control with an expected saved value. */
 export async function expectValue(page, selector, value) {
   const field = page.locator(selector)

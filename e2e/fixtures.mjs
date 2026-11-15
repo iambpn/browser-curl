@@ -10,14 +10,14 @@ import {TestHttpServer} from './http-server.mjs'
 const EVIDENCE_VIDEO_DIR = fileURLToPath(new URL('../.factory-evidence/videos', import.meta.url))
 
 /**
- * Build the video option of the browser session.
+ * Build the recording and pacing options of the browser session.
  *
- * @returns A Playwright `recordVideo` option when `FACTORY_EVIDENCE=1` is set, so a factory agent can record proof.
+ * @returns Recording with readable action pacing when `FACTORY_EVIDENCE=1` is set.
  * Otherwise an empty object, so normal test runs record nothing.
  */
 function evidenceVideoOptions() {
   if (process.env.FACTORY_EVIDENCE !== '1') return {}
-  return {recordVideo: {dir: EVIDENCE_VIDEO_DIR, size: {width: 1100, height: 1000}}}
+  return {recordVideo: {dir: EVIDENCE_VIDEO_DIR, size: {width: 1100, height: 1000}}, slowMo: 200}
 }
 
 /** Launch and restart the built extension while retaining only this test's private browser profile. */
