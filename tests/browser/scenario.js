@@ -1,4 +1,4 @@
-/** Browser workflows with real panel DOM, production bundles, and simulated extension storage, ports, and fetch. */
+/** Browser workflows with real panel DOM, production bundles, and simulated extension storage, ports, fetch, and Web Locks. */
 const values = new Map()
 const network = []
 const connections = new Set()
@@ -163,6 +163,34 @@ window.chrome = {
   }
 }
 
+/**
+ * Grant exclusive Web Locks inside this page, shared by the background and every panel.
+ * Chrome grants real locks in another process. The `--virtual-time-budget` clock keeps moving while the page waits
+ * for that grant, so a slow grant can pass an `until` deadline. The Playwright e2e suite covers the real lock service.
+ */
+const lockQueues = new Map()
+const simulatedLocks = {
+  /** Run the callback after earlier holders of the same lock name finish, and return the callback's result. */
+  request(name, callback) {
+    const previousHolder = lockQueues.get(name) ?? Promise.resolve()
+    const lock = {name, mode: 'exclusive'}
+    /** Start the callback once the earlier holder releases the lock. */
+    function hold() { return callback(lock) }
+    const result = previousHolder.then(hold)
+    /** Release the lock after success or failure, and forget the name when no later request waits for it. */
+    function release() { if (lockQueues.get(name) === released) lockQueues.delete(name) }
+    const released = result.then(release, release)
+    lockQueues.set(name, released)
+    return result
+  }
+}
+
+/** Replace the browser lock service of a window before its production code runs. */
+function useSimulatedLocks(target) {
+  Object.defineProperty(target.navigator, 'locks', {value: simulatedLocks})
+}
+useSimulatedLocks(window)
+
 /** Fail a browser assertion with a readable workflow step. */
 function check(condition, message) {
   if (!condition) throw new Error(message)
@@ -213,6 +241,7 @@ async function openPanel() {
   document.body.append(panel)
   await loaded.promise
   panel.contentWindow.chrome = window.chrome
+  useSimulatedLocks(panel.contentWindow)
   const style = panel.contentDocument.createElement('style')
   style.textContent = panelCss
   panel.contentDocument.head.append(style)

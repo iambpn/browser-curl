@@ -304,7 +304,7 @@ pnpm test:browser
 ```
 
 Set `CHROME_BINARY` if Chrome uses a different executable name or path.
-This suite runs the production bundles with simulated extension APIs and network responses. It does not test real header rewriting or service worker lifetimes.
+This suite runs the production bundles with simulated extension APIs and network responses. It does not test real header rewriting, Web Locks, or service worker lifetimes.
 
 Install Playwright's full Chromium browser and run the real extension end-to-end tests:
 
