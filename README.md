@@ -121,25 +121,13 @@ Select the gear button to change response limits. Select **Clear** to empty the 
 
 ### Automatic disk sync
 
-In Chrome or Edge, open **Settings → Automatic disk sync**. Choose a folder, enable sync, and select all collections or specific collections.
-Select **Save sync settings**. Sync backs up saved collection changes automatically, without a repeating timer.
+In Chrome or Edge, open **Settings → Automatic disk sync**. Choose a folder, enable sync, select collections, and select **Save sync settings**.
 
-Save, import, rename, and changes to folders or saved requests trigger sync. Rapid saved changes share one export after a short pause.
-Only changed Postman JSON files are written. Sending a saved collection request checks for pending backups of already saved collection data.
-Send uses the current editor values without saving them to the collection. Unsaved edits stay in the draft and never enter a disk backup.
-Select **Save** to update the collection and its disk backup. New requests and history previews use **Save as** to choose a destination.
+Saved changes automatically update one Postman v2.1 JSON file per collection. Select **Save** to include request edits. Sending requests does not save them.
+Exports include saved credentials but no environment values. Disk edits never load into browsercurl, and deleting a collection leaves its file in place.
 
-The background finishes pending exports after the sidebar closes. Saved collection changes remain available for retry after a restart.
-Reopening the sidebar or selecting **Retry** checks unfinished backups again. Browser shutdown or lost folder permission can interrupt an export.
-If folder access is required, choose the folder again and save the settings. Closing the sidebar never saves unsaved editor changes by itself.
-
-Each collection gets a separate Postman v2.1 JSON file. Filenames include the collection's local ID to keep collections with the same name separate.
-Sync keeps the first filename after a collection rename and replaces that file on later syncs. Removing a collection from sync or deleting it in browsercurl leaves its disk file in place.
-File changes never load into browsercurl. Select **Save** to include request edits in the collection's disk backup.
-
-Files include saved request credentials. Environment base names export with empty values; environment forks and their values stay on this device.
-The sync controls show **Syncing**, the last successful sync, or an error with a recovery step and a **Retry** button.
-Firefox does not support choosing an external folder through this browser API. Use manual collection export in Firefox.
+Sync continues after the sidebar closes. If an export fails, select **Retry** or choose the folder again if access is required.
+Use manual collection export in Firefox.
 
 ### Response limits
 
@@ -151,15 +139,14 @@ Binary bodies, such as images and PDFs, are not displayed or saved in history.
 
 ### Storage and permissions
 
-Drafts, history, and collections stay in local extension storage, including entered credentials and saved response bodies. They are not synced to another device.
-Optional automatic disk sync writes collection exports only to the folder you choose. You can use your own backup or sync tools for those files.
-History keeps the newest 100 requests. Delete an entry to remove its request and response. Removing the extension also removes its local data.
+Drafts, collections, credentials, and the newest 100 history entries stay on this device. Optional disk sync exports collections to your chosen folder.
+Delete a history entry to remove its request and response. Removing the extension deletes its local data.
 
-The extension requests access to HTTP and HTTPS sites so the background script can send requests without web page CORS restrictions.
-The `storage` and `unlimitedStorage` permissions support saved drafts, collections, and response history. The extension does not inject content scripts into web pages.
+HTTP/HTTPS access lets the extension send requests without web page CORS restrictions. The `storage` and `unlimitedStorage` permissions support local data.
+The extension does not inject content scripts.
 
-Chromium uses network rules to set headers such as Cookie, Origin, Referer, User-Agent, and `Sec-*`. Firefox uses a blocking `webRequest` listener.
-The browser controls Host, Content-Length, and Connection. If the editor has no Origin header, the extension removes the browser's own Origin header.
+Chromium network rules and Firefox's blocking `webRequest` listener set request headers. The browser controls Host, Content-Length, and Connection.
+The extension removes the browser's Origin header unless you set one.
 
 ## Development
 
