@@ -684,6 +684,45 @@ main {
   gap: 8px;
 }
 
+.disk-sync {
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
+.disk-sync summary {
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.disk-sync-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.disk-sync-folder,
+.disk-sync-check,
+.disk-sync-collections label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.disk-sync-folder {
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+}
+
+.disk-sync-collections {
+  display: grid;
+  gap: 8px;
+  max-height: 130px;
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
+
 #collection-import-notice {
   margin: 12px 18px;
   flex-shrink: 0;

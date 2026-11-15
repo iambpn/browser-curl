@@ -154,7 +154,8 @@ test('editing Params preserves URL path references and resolves them when sendin
   await capture(panel, 'env-path-template-params')
 })
 
-test('collection envs resolve current values, block missing variables, persist and resend history safely', async ({extension, api}) => {
+/** Resolve current draft templates on Send while preserving saved collection data and independent history previews. */
+async function collectionEnvironmentHistory({extension, api}) {
   let panel = await extension.openPanel()
   await fill(panel, '#request-url', '{{baseUrl}}/echo')
   await panel.locator('#request-method').selectOption('POST')
@@ -236,7 +237,7 @@ test('collection envs resolve current values, block missing variables, persist a
   await capture(panel, 'env-new-name-empty')
   await click(panel, '#env-close')
   await click(panel, '#close-collections')
-  // This header is deliberately unsaved: resolution must use the current editor.
+  // This unsaved header must resolve from the current editor without changing the saved request.
   await addEntry(panel, 'headers', 'X-Fresh', '{{fresh}}')
   const count = api.requests.length
   await click(panel, '#send-request')
@@ -275,6 +276,12 @@ test('collection envs resolve current values, block missing variables, persist a
   await capture(panel, 'env-restarted-values')
   await click(panel, '#env-close')
   await click(panel, '#close-collections')
+  const beforeHistory = await panel.evaluate(storedCollections)
+  const savedEditor = beforeHistory.collections[0].requests[0].editor
+  expect(savedEditor.url).toBe('{{baseUrl}}/echo?{{token}}={{token}}')
+  expect(savedEditor.body).toBe('{"token":"{{token}}"}')
+  expect(savedEditor.headers).not.toContainEqual({enabled: true, key: 'X-Fresh', value: '{{fresh}}'})
+  expect(savedEditor).toEqual(collection.requests[0].editor)
   await click(panel, '#show-history')
   // First two sends have no fresh header. Their templates must resolve using today's chosen env.
   await panel.locator('[data-open-history]').last().click()
@@ -289,11 +296,13 @@ test('collection envs resolve current values, block missing variables, persist a
   expect((await echoedRequest(panel)).body).toBe('{"history":"local-token"}')
   expect((await echoedRequest(panel)).url).toBe('/local/echo?local-token=local-token')
   await capture(panel, 'env-history-resolved')
-  expect((await panel.evaluate(storedCollections)).collections[0].requests[0].editor).toEqual(collection.requests[0].editor)
+  const afterHistory = await panel.evaluate(storedCollections)
+  expect(afterHistory.collections[0].requests[0].editor).toEqual(savedEditor)
   // Save in a history preview must ask for a destination rather than overwrite its original request.
   await click(panel, '#save-request')
   await expect(panel.locator('#save-as-dialog')).toBeVisible()
-})
+}
+test('collection envs resolve current values, block missing variables, persist and resend history safely', collectionEnvironmentHistory)
 
 test('unlinked requests send variable text literally', async ({extension, api}) => {
   const panel = await extension.openPanel()
