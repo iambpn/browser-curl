@@ -9,6 +9,7 @@
   --muted: #85868b;
   --accent: #ed683e;
   --text: #30333a;
+  --error: #b33e3e;
 }
 
 * {
@@ -23,7 +24,7 @@ h1, p {
   margin: 0;
 }
 
-button, input {
+button, input, select {
   font: inherit;
   color: inherit;
 }
@@ -31,6 +32,72 @@ button, input {
 button {
   border: 0;
   cursor: pointer;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+h2 {
+  font-size: 17px;
+  margin: 0 0 12px;
+}
+
+.settings-section + .settings-section {
+  margin-top: 28px;
+}
+
+.section-intro {
+  margin-bottom: 12px;
+}
+
+.disk-sync > .setting-hint {
+  margin: 10px 0;
+}
+
+.settings-form.disk-sync-form {
+  margin-top: 16px;
+  gap: 14px;
+}
+
+.disk-sync-folder,
+.disk-sync-check,
+.disk-sync-collections label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.disk-sync-folder {
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+}
+
+.setting-label {
+  font-weight: 650;
+}
+
+.sync-input {
+  width: 100%;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
+}
+
+.disk-sync-collections {
+  display: grid;
+  gap: 10px;
+  max-height: 160px;
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
+
+.request-error {
+  color: var(--error);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 :focus-visible {
@@ -155,5 +222,6 @@ h1 {
     --line: #333437;
     --muted: #93949b;
     --text: #dededb;
+    --error: #ef9d9d;
   }
 }

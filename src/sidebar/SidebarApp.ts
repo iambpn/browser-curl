@@ -16,6 +16,7 @@ import {EnvAutocomplete} from './EnvAutocomplete'
 import {requestEnvSuggestions} from '../env/suggestions'
 import type {EnvSuggestion} from '../env/suggestions'
 import {COLLECTION_KEY_PREFIX, chooseCollectionEnv, findCollectionLevel, findCollectionRequest, loadCollection} from '../collections/collection-store'
+import {requestDiskSync} from '../collections/disk-sync'
 import {collectionEnvs, destinationEnvChain, pickerOptions, requestEnvChain, resolveEditor} from '../env/env'
 import {resolveRequestName} from '../history/request-state'
 import type {CollectionDestination, CollectionRequestLink, EditorState, HistorySummary, PanelSnapshot, SavedRequest, SentEditorState} from '../history/request-state'
@@ -264,6 +265,7 @@ class SidebarApp {
     )
     element<HTMLSelectElement>('#env-picker').addEventListener('change', this.chooseEnv)
     void this.restoreWorkspace()
+    void requestDiskSync().catch(this.reportDiskSyncFailure)
   }
 
   /** Restore the last editor and response before enabling input, so startup cannot overwrite a newer draft. */
@@ -1207,7 +1209,7 @@ class SidebarApp {
     }
   }
 
-  /** Send or cancel a request. A cURL command in the URL field is imported instead of sent. */
+  /** Send current draft values and request a backup of saved collection data without saving editor changes. */
   private sendRequest = async (event: SubmitEvent): Promise<void> => {
     event.preventDefault()
     if (this.preparingSend) return
@@ -1268,6 +1270,7 @@ class SidebarApp {
       this.setLoading(true)
       this.updateWorkspaceLabel()
       this.persistWorkspace()
+      if (existingLink) void requestDiskSync().catch(this.reportDiskSyncFailure)
       this.preparingSend = false
       const sentEditor: SentEditorState = {...editor}
       if (existingLink) sentEditor.collectionRequest = existingLink
@@ -1296,6 +1299,9 @@ class SidebarApp {
       }
     }
   }
+
+  /** Keep backup messaging failures separate from the HTTP request and its editable draft. */
+  private reportDiskSyncFailure = (error: unknown): void => { console.error('Could not start collection disk sync.', error) }
 
   /** Show response metadata as text, including the complete content type and final URL in tooltips. */
   private renderResponseStats(response: HttpResponsePayload): void {
@@ -1408,9 +1414,10 @@ class SidebarApp {
     this.form.requestSubmit()
   }
 
-  /** Save the draft and resize preference, and detach panel listeners while background requests continue. */
+  /** Preserve the draft, check pending backups, and detach listeners while background work continues. */
   private dispose = (): void => {
     this.persistWorkspace()
+    void requestDiskSync().catch(this.reportDiskSyncFailure)
     this.disposed = true
     this.envAutocomplete.dispose()
     if (this.resizeStart) this.rememberResponseHeight()
