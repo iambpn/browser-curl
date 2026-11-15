@@ -335,17 +335,6 @@ Each test closes its browser and server and removes its temporary profile. Failu
 The suite opens the sidebar document as an extension tab. It does not automate the browser's native sidebar frame or toolbar.
 It does not cover Firefox runtime behavior, external services, HTTPS certificates, or store signing. The real timeout test takes about 30 seconds.
 
-Record the paced collection-sync walkthrough after building Chromium:
-
-```bash
-pnpm build
-node scripts/record-collection-sync.mjs
-```
-
-The recording and timestamped assertions are written to `.playwright/collection-sync-evidence/`.
-The walkthrough uses the production sidebar and Settings pages in test frames with real file streams. It labels simulated folder selection and injected disk failures.
-See [the recorded walkthrough](docs/test-evidence/README.md) for the video, checkpoints, and verification limits.
-
 ### Source layout
 
 ```text
