@@ -67,6 +67,17 @@ test('history records collection provenance independently of the original editor
   assert.deepEqual(await loadSavedRequest(saved.id), {...saved, editor, collectionRequest})
 })
 
+/** Keep an unsaved request's chosen folder outside editor values so history can resolve its current environment. */
+async function unsavedDestinationHistory() {
+  storage()
+  const saved = savedFixture()
+  const collectionDestination = {collectionId: 'collection', folderId: 'folder'}
+  const editor = {...saved.editor, url: '{{baseUrl}}/items'}
+  await createSavedRequest({...saved, editor: {...editor, collectionDestination}})
+  assert.deepEqual(await loadSavedRequest(saved.id), {...saved, editor, collectionDestination})
+}
+test('history keeps unsaved collection destinations separate from editor values', unsavedDestinationHistory)
+
 /** Test both completion/deletion orderings so a response cannot restore a deleted request. */
 async function deletionRaces() {
   storage()

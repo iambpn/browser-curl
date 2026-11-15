@@ -1,13 +1,14 @@
 /** In-panel collection browsing and Save as forms. Collection writes stay in the side panel. */
 import {
   addCollectionFolder, addCollectionRequest, COLLECTION_INDEX_KEY, COLLECTION_KEY_PREFIX, createCollection,
-  deleteCollectionItem, exportCollection, findCollectionRequest, listCollections, loadCollection, renameCollectionItem, saveImportedCollection, updateCollectionRequest
+  deleteCollectionItem, exportCollection, findCollectionLevel, findCollectionRequest, listCollections, loadCollection, renameCollectionItem, saveImportedCollection, updateCollectionRequest
 } from '../collections/collection-store'
 import type {Collection, CollectionItem} from '../collections/collection-store'
-import type {CollectionRequestLink, EditorState} from '../history/request-state'
+import type {CollectionDestination, CollectionRequestLink, EditorState} from '../history/request-state'
 import {resolveRequestName} from '../history/request-state'
 import {importPostmanCollection} from '../collections/postman-converter'
 import {EnvironmentsEditor} from './EnvironmentsEditor'
+import {collectionKindIcon, COLLECTION_ROOT_ICON, FOLDER_ICON} from './collection-icons'
 
 /** Find a required control in the sidebar's static markup. */
 function element<T extends HTMLElement>(selector: string): T {
@@ -35,32 +36,45 @@ function isEmptyEditor(editor: EditorState): boolean {
     && Object.entries(editor.authValues).every(([key, value]) => value === (key === 'api-key-location' ? 'header' : ''))
 }
 
-/** Labels mark the kind of destination, because a native select cannot style rows by kind. The tree uses the same icons. */
-const COLLECTION_ROOT_ICON = '\u{1F4DA}'
-const FOLDER_ICON = '\u{1F4C1}'
 /** One indent level in a Save as label. Native selects ignore option padding in some browsers, but keep non-breaking spaces. */
 const OPTION_INDENT = '\u00a0'.repeat(4)
 
-/**
- * Build one Save as group for a collection. Option values are `collectionId` for the root
- * and `collectionId/folderId` for a folder. Folder labels are indented by depth under the root
- * and show their path inside the collection.
- */
-function collectionDestinations(collection: Collection): HTMLOptGroupElement {
-  const group = document.createElement('optgroup')
-  group.label = collection.name
-  group.append(new Option(`${COLLECTION_ROOT_ICON} ${collection.name} (root)`, collection.id))
-  const appendFolders = (items: CollectionItem[], parentPath: string[]): void => {
+/** A selectable collection heading or a folder beneath it, shared by both destination pickers. */
+interface DestinationChoice {
+  value: string
+  path: string
+  depth: number
+  kind: 'collection' | 'folder'
+}
+
+/** List each collection once, followed by its folders in tree order. Saved APIs are not destinations. */
+function collectionDestinations(collection: Collection): DestinationChoice[] {
+  const choices: DestinationChoice[] = [{
+    value: collection.id, path: collection.name, depth: 0, kind: 'collection'
+  }]
+  /** Preserve folder depth and paths without repeating the collection name in child labels. */
+  function appendFolders(items: CollectionItem[], parentPath: string[]): void {
     for (const item of items) {
       if (!('requests' in item)) continue
       const path = [...parentPath, item.name]
-      const indent = OPTION_INDENT.repeat(path.length)
-      group.append(new Option(`${indent}${FOLDER_ICON} ${path.join(' / ')}`, `${collection.id}/${item.id}`))
+      const folderPath = path.join(' / ')
+      choices.push({
+        value: `${collection.id}/${item.id}`, path: folderPath, depth: path.length, kind: 'folder'
+      })
       appendFolders(item.requests, path)
     }
   }
   appendFolders(collection.requests, [])
-  return group
+  return choices
+}
+
+/** A collection option serves as its own selectable heading; folders keep their indented paths. */
+function destinationOption(choice: DestinationChoice): HTMLOptionElement {
+  const icon = choice.kind === 'collection' ? COLLECTION_ROOT_ICON : FOLDER_ICON
+  const indent = OPTION_INDENT.repeat(choice.depth)
+  const option = new Option(`${indent}${icon} ${choice.path}`, choice.value)
+  if (choice.kind === 'collection') option.className = 'destination-root'
+  return option
 }
 
 /** Coordinate collection dialogs with the editor through its existing snapshot interface. */
@@ -99,15 +113,29 @@ export class CollectionsPanel {
   private saving = false
   private statusTimer: ReturnType<typeof setTimeout> | undefined
   private disposed = false
+  private newRequestDialog = element<HTMLDialogElement>('#new-request-dialog')
+  private newRequestPicker = element<HTMLSelectElement>('#new-request-collection')
+  private newRequestError = element('#new-request-error')
+  private newRequestConfirm = element<HTMLButtonElement>('#confirm-new-request')
+  private newRequestRefresh = 0
+  private newRequestRevision = 0
+  private newRequestSubmitting = false
 
-  /** Connect collection browsing, import, export, and editor save actions. */
+  /** Connect collection actions, saved requests, and the destination picker for new unsaved requests. */
   constructor(
     private readEditor: () => EditorState,
     private openEditor: (editor: EditorState, link: CollectionRequestLink) => void,
     private readLink: () => CollectionRequestLink | undefined,
     private linkEditor: (link: CollectionRequestLink, name?: string) => void,
-    private readEditorRevision: () => number
+    private readEditorRevision: () => number,
+    private readDestination: () => CollectionDestination | undefined,
+    private startNewRequest: (destination?: CollectionDestination) => void
   ) {
+    element('#new-request').addEventListener('click', this.showNewRequest)
+    element('#cancel-new-request').addEventListener('click', this.cancelNewRequest)
+    element('#new-request-form').addEventListener('submit', this.confirmNewRequest)
+    this.newRequestPicker.addEventListener('change', this.chooseNewRequestDestination)
+    this.newRequestDialog.addEventListener('close', this.invalidateNewRequest)
     element('#show-collections').addEventListener('click', this.show)
     element('#close-collections').addEventListener('click', () => this.dialog.close())
     element('#save-as').addEventListener('click', this.showSaveAs)
@@ -140,6 +168,125 @@ export class CollectionsPanel {
     this.dialog.addEventListener('close', this.cancelLoad)
     chrome.storage.onChanged.addListener(this.storageChanged)
     window.addEventListener('pagehide', this.dispose, {once: true})
+  }
+
+  /** Read live collections before showing destinations, and skip the dialog when none remain. */
+  private showNewRequest = async (): Promise<void> => {
+    const button = element<HTMLButtonElement>('#new-request')
+    if (button.disabled) return
+    button.disabled = true
+    this.newRequestRevision += 1
+    const revision = this.readEditorRevision()
+    try {
+      const collections = await this.readAvailableCollections()
+      if (this.disposed || revision !== this.readEditorRevision()) return
+      if (!collections.length) {
+        this.startNewRequest()
+        return
+      }
+      this.renderNewRequestPicker(collections, 'none')
+      this.newRequestError.hidden = true
+      this.newRequestDialog.showModal()
+    } catch {
+      if (this.disposed || revision !== this.readEditorRevision()) return
+      this.newRequestError.textContent = 'Could not read collections. Close this dialog and try again.'
+      this.newRequestError.hidden = false
+      this.newRequestPicker.replaceChildren()
+      this.newRequestConfirm.disabled = true
+      if (!this.newRequestDialog.open) this.newRequestDialog.showModal()
+    } finally {
+      button.disabled = false
+    }
+  }
+
+  /** Read only indexed collections and omit entries deleted since their index was read. */
+  private async readAvailableCollections(): Promise<Collection[]> {
+    const index = await listCollections()
+    const collections: Collection[] = []
+    for (const {id} of index) {
+      const collection = await loadCollection(id)
+      if (collection) collections.push(collection)
+    }
+    return collections
+  }
+
+  /** Keep a selected destination while showing collections and nested folders with shared icons. */
+  private renderNewRequestPicker(collections: Collection[], selected: string): void {
+    const choices = collections.flatMap(collectionDestinations)
+    const options = choices.map(destinationOption)
+    this.newRequestPicker.replaceChildren(new Option('No collection', 'none'), ...options)
+    this.newRequestPicker.value = selected
+    const isMissing = !this.newRequestPicker.value
+    this.newRequestError.hidden = !isMissing
+    if (isMissing) this.newRequestError.textContent = 'The selected collection or folder is no longer available. Choose another destination.'
+    this.newRequestConfirm.disabled = isMissing || this.newRequestSubmitting
+  }
+
+  /** Require an explicit replacement if another panel removes the selected destination. */
+  private chooseNewRequestDestination = (): void => {
+    this.newRequestError.hidden = true
+    const selected = this.newRequestPicker.value
+    this.newRequestConfirm.disabled = this.newRequestSubmitting || selected === ''
+  }
+
+  /** Invalidate any pending confirmation when Cancel or Escape closes the dialog. */
+  private invalidateNewRequest = (): void => {
+    this.newRequestRevision += 1
+    this.newRequestRefresh += 1
+  }
+
+  /** Cancel or Escape leaves the current draft and saved request untouched. */
+  private cancelNewRequest = (): void => {
+    this.newRequestDialog.close()
+  }
+
+  /** Recheck the chosen container before replacing the editor, without adding a saved request. */
+  private confirmNewRequest = async (event: SubmitEvent): Promise<void> => {
+    event.preventDefault()
+    if (this.newRequestConfirm.disabled || this.newRequestSubmitting) return
+    this.newRequestSubmitting = true
+    this.newRequestConfirm.disabled = true
+    this.newRequestError.hidden = true
+    const editorRevision = this.readEditorRevision()
+    const dialogRevision = this.newRequestRevision
+    const selected = this.newRequestPicker.value
+    try {
+      let destination: CollectionDestination | undefined
+      if (selected !== 'none') {
+        const [collectionId, folderId] = selected.split('/')
+        const collection = await loadCollection(collectionId, {waitForWrites: true})
+        const container = collection && findCollectionLevel(collection, folderId ?? collectionId)
+        if (!container || !('requests' in container)) throw new Error('The selected collection or folder is no longer available. Choose another destination.')
+        destination = folderId ? {collectionId, folderId} : {collectionId}
+      }
+      if (this.disposed || !this.newRequestDialog.open || editorRevision !== this.readEditorRevision()) return
+      if (dialogRevision !== this.newRequestRevision) return
+      this.newRequestDialog.close()
+      this.startNewRequest(destination)
+    } catch (error) {
+      if (!this.newRequestDialog.open || this.disposed || dialogRevision !== this.newRequestRevision) return
+      this.newRequestError.textContent = error instanceof Error ? error.message : 'Could not read the selected collection. Try again.'
+      this.newRequestError.hidden = false
+    } finally {
+      this.newRequestSubmitting = false
+      this.newRequestConfirm.disabled = !this.newRequestPicker.value
+    }
+  }
+
+  /** Refresh an open destination dialog after collection changes without replacing the current editor. */
+  private async refreshNewRequestPicker(): Promise<void> {
+    const revision = ++this.newRequestRefresh
+    const selected = this.newRequestPicker.value
+    try {
+      const collections = await this.readAvailableCollections()
+      if (this.disposed || !this.newRequestDialog.open || revision !== this.newRequestRefresh) return
+      this.renderNewRequestPicker(collections, selected)
+    } catch {
+      if (this.disposed || !this.newRequestDialog.open || revision !== this.newRequestRefresh) return
+      this.newRequestError.textContent = 'Could not refresh collections. Close this dialog and try again.'
+      this.newRequestError.hidden = false
+      this.newRequestConfirm.disabled = true
+    }
   }
 
   /** Open a fresh view of all saved collections. Native dialog Escape returns to the editor. */
@@ -187,6 +334,7 @@ export class CollectionsPanel {
     return this.treeItem(collection, collection, 0)
   }
 
+  /** Build a collection, folder, or API row using the same symbols as variable suggestions and destination pickers. */
   private treeItem(collection: Collection, item: Collection | CollectionItem, depth: number): HTMLLIElement {
     const node = document.createElement('li')
     const row = document.createElement('div')
@@ -200,10 +348,9 @@ export class CollectionsPanel {
     if (isRequest) {
       button.dataset.openCollectionRequest = item.id
       button.dataset.collectionId = collection.id
-      const method = document.createElement('span')
-      method.className = 'history-method'
+      const method = collectionKindIcon('api', item.editor.method)
+      method.removeAttribute('aria-hidden')
       method.dataset.collectionMethod = ''
-      method.textContent = item.editor.method
       button.append(method)
     } else {
       const collapsed = this.collapsed.has(item.id)
@@ -219,7 +366,10 @@ export class CollectionsPanel {
         void this.render()
       })
     }
-    if (!isRequest) button.append(this.kindIcon(item.id === collection.id ? COLLECTION_ROOT_ICON : FOLDER_ICON))
+    if (!isRequest) {
+      const kind = item.id === collection.id ? 'collection' : 'folder'
+      button.append(collectionKindIcon(kind))
+    }
     const label = document.createElement('span')
     label.className = 'history-name'
     label.dataset.itemName = ''
@@ -255,15 +405,6 @@ export class CollectionsPanel {
       node.append(children)
     }
     return node
-  }
-
-  /** The collection or folder icon before a tree name. It is hidden from screen readers, so the button name stays the item name. */
-  private kindIcon(symbol: string): HTMLSpanElement {
-    const icon = document.createElement('span')
-    icon.className = 'collection-kind-icon'
-    icon.setAttribute('aria-hidden', 'true')
-    icon.textContent = symbol
-    return icon
   }
 
   private action(name: string, run: () => void): HTMLButtonElement {
@@ -319,11 +460,12 @@ export class CollectionsPanel {
     this.deleteWarning.hidden = true
   }
 
+  /** Explain which credential values are included before confirming the export of saved request fields. */
   private showExport(collectionId: string, name: string): void {
     // A new prompt must never reactivate an earlier confirmation for the same collection.
     this.pendingExport = {collectionId}
     this.error.hidden = true
-    element('#collection-export-message').textContent = `The file for “${name}” contains saved credentials. Share it only with people you trust.`
+    element('#collection-export-message').textContent = `The export for “${name}” excludes environment values. Credentials entered directly in request fields are included. Review those fields before sharing.`
     this.exportWarning.hidden = false
     element('#cancel-collection-export').focus()
   }
@@ -514,7 +656,7 @@ export class CollectionsPanel {
     this.warning.hidden = true
   }
 
-  /** Suggest the current editor name and offer existing collections alongside New collection. */
+  /** Suggest the current name and preselect an unsaved request's chosen collection or folder when present. */
   private showSaveAs = (): void => {
     const editor = this.readEditor()
     this.name.value = resolveRequestName(editor.name, editor.url)
@@ -522,6 +664,11 @@ export class CollectionsPanel {
     this.saveError.hidden = true
     this.status.hidden = true
     this.picker.replaceChildren()
+    const destination = this.readDestination()
+    if (destination) {
+      const selected = destination.folderId ? `${destination.collectionId}/${destination.folderId}` : destination.collectionId
+      this.picker.append(new Option('', selected))
+    }
     this.saveDialog.showModal()
     void this.refreshPicker()
   }
@@ -547,13 +694,14 @@ export class CollectionsPanel {
   }
 
   /**
-   * Group destinations by collection: the collection root comes first, then each folder as a path.
+   * List each collection once as a selectable heading, followed by its folders as paths.
    * Keep New collection selected on first use when the index is empty.
    */
   private renderPicker(collections: Collection[], selected: string): void {
-    const groups = collections.map(collectionDestinations)
+    const choices = collections.flatMap(collectionDestinations)
+    const options = choices.map(destinationOption)
     const newCollection = new Option('\uff0b New collection', 'new')
-    this.picker.replaceChildren(...groups, newCollection)
+    this.picker.replaceChildren(...options, newCollection)
     const values = Array.from(this.picker.options, (option) => option.value)
     if (values.includes(selected)) this.picker.value = selected
     this.updateNewCollection()
@@ -638,6 +786,7 @@ export class CollectionsPanel {
     if (!changed) return
     if (this.dialog.open) void this.render()
     if (this.saveDialog.open) void this.refreshPicker()
+    if (this.newRequestDialog.open) void this.refreshNewRequestPicker()
   }
 
   /** Detach the collection listener when the side panel closes. */

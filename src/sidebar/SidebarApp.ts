@@ -12,11 +12,14 @@ import {
   HISTORY_INDEX_KEY, HISTORY_KEY_PREFIX, listHistorySummaries, loadSavedRequest, loadWorkspace, saveWorkspace
 } from '../history/request-store'
 import {CollectionsPanel} from './CollectionsPanel'
-import {COLLECTION_KEY_PREFIX, chooseCollectionEnv, findCollectionRequest, loadCollection} from '../collections/collection-store'
+import {EnvAutocomplete} from './EnvAutocomplete'
+import {requestEnvSuggestions} from '../env/suggestions'
+import type {EnvSuggestion} from '../env/suggestions'
+import {COLLECTION_KEY_PREFIX, chooseCollectionEnv, findCollectionLevel, findCollectionRequest, loadCollection} from '../collections/collection-store'
 import {requestDiskSync} from '../collections/disk-sync'
-import {collectionEnvs, pickerOptions, requestEnvChain, resolveEditor} from '../env/env'
+import {collectionEnvs, destinationEnvChain, pickerOptions, requestEnvChain, resolveEditor} from '../env/env'
 import {resolveRequestName} from '../history/request-state'
-import type {CollectionRequestLink, EditorState, HistorySummary, PanelSnapshot, SavedRequest} from '../history/request-state'
+import type {CollectionDestination, CollectionRequestLink, EditorState, HistorySummary, PanelSnapshot, SavedRequest, SentEditorState} from '../history/request-state'
 
 /** Milliseconds to wait after the last keystroke before the panel saves the draft. */
 const DRAFT_SAVE_DELAY_MS = 300
@@ -142,6 +145,7 @@ function element<T extends HTMLElement>(selector: string): T {
 /** Manage the request editor, persistent workspace, history, and response display. */
 class SidebarApp {
   private form = element<HTMLFormElement>('#request-form')
+  private envAutocomplete: EnvAutocomplete
   private url = element<HTMLInputElement>('#request-url')
   private method = element<HTMLSelectElement>('#request-method')
   private send = element<HTMLButtonElement>('#send-request')
@@ -169,6 +173,7 @@ class SidebarApp {
   private draftSaveTimer: ReturnType<typeof setTimeout> | undefined
   private draftBeforeHistory: PanelSnapshot | undefined
   private collectionRequest: CollectionRequestLink | undefined
+  private collectionDestination: CollectionDestination | undefined
   private historySource: CollectionRequestLink | undefined
   private preparingSend = false
   private editorRevision = 0
@@ -207,6 +212,7 @@ class SidebarApp {
 
   /** Restore the panel layout and connect request, naming, authorization, and resize events. */
   constructor() {
+    this.envAutocomplete = new EnvAutocomplete(this.form, this.loadEnvSuggestions)
     for (const id of AUTH_FIELD_IDS) {
       this.authFields.set(id, element<HTMLInputElement | HTMLSelectElement>(`#${id}`))
     }
@@ -231,7 +237,6 @@ class SidebarApp {
     this.historyList.addEventListener('click', this.handleHistoryClick)
     this.backToDraftButton.addEventListener('click', this.backToDraft)
     element('#clear-request').addEventListener('click', this.clearRequest)
-    element('#new-request').addEventListener('click', this.clearRequest)
     chrome.storage.onChanged.addListener(this.handleStorageChange)
     element('#response-tabs').addEventListener('click', this.handleResponseTab)
     element('#response-tabs').addEventListener('keydown', this.handleTabKey)
@@ -255,7 +260,8 @@ class SidebarApp {
     this.fitResponse()
     new CollectionsPanel(
       () => this.readEditorState(), this.openCollectionRequest,
-      () => this.collectionRequest, this.linkCollectionRequest, () => this.editorRevision
+      () => this.collectionRequest, this.linkCollectionRequest, () => this.editorRevision,
+      this.readCollectionDestination, this.startNewRequest
     )
     element<HTMLSelectElement>('#env-picker').addEventListener('change', this.chooseEnv)
     void this.restoreWorkspace()
@@ -273,6 +279,7 @@ class SidebarApp {
         const snapshot = workspace.preview ?? workspace.draft
         this.applyEditorState(snapshot.editor)
         this.collectionRequest = snapshot.collectionRequest
+        this.collectionDestination = snapshot.collectionDestination
         this.historySource = snapshot.historySource
         void this.updateCollectionHeading()
         this.responseId = snapshot.responseId
@@ -295,7 +302,7 @@ class SidebarApp {
   private readPanelSnapshot(): PanelSnapshot {
     return {
       editor: this.readEditorState(), responseId: this.responseId,
-      collectionRequest: this.collectionRequest, historySource: this.historySource
+      collectionRequest: this.collectionRequest, collectionDestination: this.collectionDestination, historySource: this.historySource
     }
   }
 
@@ -515,6 +522,7 @@ class SidebarApp {
       if (!saved) return
       if (!this.draftBeforeHistory) this.draftBeforeHistory = this.readPanelSnapshot()
       this.collectionRequest = undefined
+      this.collectionDestination = saved.collectionDestination
       this.historySource = saved.collectionRequest
       void this.updateCollectionHeading()
       this.hideImportNotice()
@@ -539,6 +547,7 @@ class SidebarApp {
     this.resetResponse()
     this.applyEditorState(editor)
     this.collectionRequest = link
+    this.collectionDestination = undefined
     this.historySource = undefined
     void this.updateCollectionHeading()
     this.updateWorkspaceLabel()
@@ -548,6 +557,7 @@ class SidebarApp {
   /** Save as changes the destination and, unless edited during the save, the request name. */
   private linkCollectionRequest = (link: CollectionRequestLink, name?: string): void => {
     this.collectionRequest = link
+    this.collectionDestination = undefined
     this.historySource = undefined
     if (name !== undefined) this.requestName = name
     this.updateRequestName()
@@ -565,19 +575,27 @@ class SidebarApp {
     const picker = element<HTMLSelectElement>('#env-picker')
     const saveAs = element('#save-as')
     const link = this.collectionRequest
+    const destination = this.collectionDestination
+    const collectionId = link?.collectionId ?? destination?.collectionId
     heading.hidden = true
     picker.hidden = true
-    saveAs.hidden = !link
-    if (!link) return
+    saveAs.hidden = true
+    if (!collectionId || this.draftBeforeHistory) return
     try {
-      const collection = await loadCollection(link.collectionId)
+      const collection = await loadCollection(collectionId)
       if (revision !== this.collectionHeadingRevision || this.disposed) return
-      const isSaved = Boolean(collection && findCollectionRequest(collection, link.requestId))
-      saveAs.hidden = !isSaved
-      if (!collection || !isSaved) return
-      heading.textContent = collection.name
-      heading.title = collection?.name ?? ''
-      heading.hidden = !collection
+      if (!collection) return
+      const savedRequest = link ? findCollectionRequest(collection, link.requestId) : undefined
+      saveAs.hidden = !savedRequest
+      if (link && !savedRequest) return
+      const levelId = link?.requestId ?? destination?.folderId ?? collection.id
+      const level = findCollectionLevel(collection, levelId)
+      if (!level) return
+      let folderName = ''
+      if ('name' in level && level.id !== collection.id) folderName = level.name
+      heading.textContent = folderName ? `${collection.name} / ${folderName}` : collection.name
+      heading.title = heading.textContent
+      heading.hidden = false
       picker.replaceChildren(...pickerOptions(collectionEnvs(collection)).map(({name, label}) => new Option(label, name ?? '')))
       picker.value = collection.chosenEnv ?? ''
       picker.hidden = false
@@ -586,13 +604,34 @@ class SidebarApp {
     }
   }
 
+  /** Read the unsaved destination for Save without treating it as an existing API link. */
+  private readCollectionDestination = (): CollectionDestination | undefined => this.collectionDestination
+
+  /** Read names for the API, history source, or unsaved destination using the latest collection and selected env. */
+  private loadEnvSuggestions = async (): Promise<EnvSuggestion[]> => {
+    const source = this.envSource()
+    if (!source) return []
+    const collection = await loadCollection(source.collectionId, {waitForWrites: true})
+    if (!collection) return []
+    return requestEnvSuggestions(collection, source.levelId ?? collection.id)
+  }
+
+  /** Identify the saved API or unsaved destination whose environment applies to the current editor. */
+  private envSource(): {collectionId: string; levelId?: string} | undefined {
+    const link = this.collectionRequest ?? this.historySource
+    if (link) return {collectionId: link.collectionId, levelId: link.requestId}
+    const destination = this.collectionDestination
+    if (destination) return {collectionId: destination.collectionId, levelId: destination.folderId}
+  }
+
+  /** Persist the selected env before refreshing the collection heading and future suggestions. */
   private chooseEnv = async (): Promise<void> => {
-    const link = this.collectionRequest
+    const collectionId = this.collectionRequest?.collectionId ?? this.collectionDestination?.collectionId
     const picker = element<HTMLSelectElement>('#env-picker')
-    if (!link) return
+    if (!collectionId) return
     picker.disabled = true
     try {
-      await chooseCollectionEnv(link.collectionId, picker.value || null)
+      await chooseCollectionEnv(collectionId, picker.value || null)
     } catch (error) {
       this.showError(error instanceof Error ? error.message : 'Could not save the chosen env.')
     } finally {
@@ -609,6 +648,7 @@ class SidebarApp {
     this.hideImportNotice()
     this.applyEditorState(draft.editor)
     this.collectionRequest = draft.collectionRequest
+    this.collectionDestination = draft.collectionDestination
     this.historySource = draft.historySource
     void this.updateCollectionHeading()
     this.responseId = draft.responseId
@@ -621,14 +661,20 @@ class SidebarApp {
     this.persistWorkspace()
   }
 
-  /**
-   * Empty every form value and the visible response, while keeping saved history and background sends.
-   * New request uses this too: a new request is a blank form with no collection link.
-   */
+  /** Open a blank unsaved editor and remember its chosen collection or folder until Save. */
+  private startNewRequest = (destination?: CollectionDestination): void => {
+    this.clearRequest()
+    this.collectionDestination = destination
+    void this.updateCollectionHeading()
+    this.persistWorkspace()
+  }
+
+  /** Empty the editor, destination, and visible response while keeping saved history and background sends. */
   private clearRequest = (): void => {
     this.canPersistWorkspace = true
     this.draftBeforeHistory = undefined
     this.collectionRequest = undefined
+    this.collectionDestination = undefined
     this.historySource = undefined
     void this.updateCollectionHeading()
     this.responseId = undefined
@@ -649,10 +695,13 @@ class SidebarApp {
     this.url.focus()
   }
 
-  /** Update open history and the displayed response when the background stores a result or deletion. */
+  /** Refresh collection context, suggestions, history, and responses when saved data changes. */
   private handleStorageChange = (changes: Record<string, chrome.storage.StorageChange>, area: string): void => {
     if (area !== 'local' || this.disposed) return
-    if (this.collectionRequest && changes[COLLECTION_KEY_PREFIX + this.collectionRequest.collectionId]) {
+    const envLink = this.envSource()
+    if (envLink && changes[COLLECTION_KEY_PREFIX + envLink.collectionId]) this.envAutocomplete.close()
+    const collectionId = this.collectionRequest?.collectionId ?? this.collectionDestination?.collectionId
+    if (collectionId && changes[COLLECTION_KEY_PREFIX + collectionId]) {
       void this.updateCollectionHeading()
     }
     const indexChange = changes[HISTORY_INDEX_KEY]
@@ -832,6 +881,7 @@ class SidebarApp {
 
   /** Replace every editor value and update the dependent labels, counts, and fields. */
   private applyEditorState(state: EditorState): void {
+    this.envAutocomplete.close()
     this.editorRevision += 1
     this.requestName = state.name
     this.nameInput.hidden = true
@@ -1180,14 +1230,21 @@ class SidebarApp {
     try {
       const editor = this.readEditorState()
       const link = this.collectionRequest ?? this.historySource
+      const source = this.envSource()
       let resolved = editor
       let existingLink: CollectionRequestLink | undefined
-      if (link) {
+      let existingDestination: CollectionDestination | undefined
+      if (source) {
         // Wait for pending env edits and picker writes before taking the send's collection snapshot.
-        const collection = await loadCollection(link.collectionId, {waitForWrites: true})
-        const chain = collection && requestEnvChain(collection, link.requestId)
+        const collection = await loadCollection(source.collectionId, {waitForWrites: true})
+        const sourceId = source.levelId ?? collection?.id
+        let chain
+        if (collection && sourceId) {
+          chain = link ? requestEnvChain(collection, sourceId) : destinationEnvChain(collection, sourceId)
+        }
         if (collection && chain) {
           existingLink = link
+          existingDestination = link ? undefined : this.collectionDestination
           const result = resolveEditor(chain, collection.chosenEnv ?? null, editor)
           if (result.missing) {
             const names = result.missing.map((name) => `“${name}”`).join(', ')
@@ -1215,7 +1272,10 @@ class SidebarApp {
       this.persistWorkspace()
       if (existingLink) void requestDiskSync().catch(this.reportDiskSyncFailure)
       this.preparingSend = false
-      const result = await sendThroughBackground(payload, existingLink ? {...editor, collectionRequest: existingLink} : editor, id)
+      const sentEditor: SentEditorState = {...editor}
+      if (existingLink) sentEditor.collectionRequest = existingLink
+      if (existingDestination) sentEditor.collectionDestination = existingDestination
+      const result = await sendThroughBackground(payload, sentEditor, id)
       if (this.disposed || this.responseId !== id) return
       this.showResult(result)
     } catch (error) {
@@ -1359,6 +1419,7 @@ class SidebarApp {
     this.persistWorkspace()
     void requestDiskSync().catch(this.reportDiskSyncFailure)
     this.disposed = true
+    this.envAutocomplete.dispose()
     if (this.resizeStart) this.rememberResponseHeight()
     chrome.storage.onChanged.removeListener(this.handleStorageChange)
     document.body.classList.remove('is-resizing')

@@ -3,7 +3,7 @@ import {appendFile} from 'node:fs/promises'
 import {test, expect} from './fixtures.mjs'
 import {
   addEntry, click, expectHidden, expectText, expectValue, expectVisible, fill,
-  savedWorkspaceWith, send, storedCollections, storedHistory, storedWorkspace, folderOption
+  chooseNewRequestDestination, savedWorkspaceWith, send, storedCollections, storedHistory, storedWorkspace, folderOption
 } from './panel-helpers.mjs'
 
 /** Create a saved request using the public Save as form. */
@@ -409,7 +409,8 @@ for (const rename of ['committed', 'in progress']) {
   })
 }
 
-test('Save as becomes usable when a pending linked Save finishes', async ({extension, api}) => {
+/** Verify the destination picker becomes usable after a pending Save finishes. */
+async function savePickerAfterPendingSave({extension, api}) {
   const panel = await extension.openPanel()
   await fill(panel, '#request-url', `${api.origin}/echo?original=yes`)
   await saveAs(panel, 'Original request', 'Widget API')
@@ -418,7 +419,7 @@ test('Save as becomes usable when a pending linked Save finishes', async ({exten
   await click(panel, '#save-request')
   await expectPendingCollectionSave(panel)
   await click(panel, '#save-as')
-  await expect(panel.locator('#save-collection option')).toHaveText(['\u{1F4DA} Widget API (root)', '\uff0b New collection'])
+  await expect(panel.locator('#save-collection option')).toHaveText(['\u{1F4DA} Widget API', '\uff0b New collection'])
   await expect(panel.locator('#confirm-save-as')).toBeDisabled()
 
   await releaseCollectionLock(panel)
@@ -432,9 +433,11 @@ test('Save as becomes usable when a pending linked Save finishes', async ({exten
   const {collections: [collection]} = await panel.evaluate(storedCollections)
   expect(collection.requests.map(({editor}) => editor.name)).toEqual(['Original request', 'Copy after Save'])
   expect(collection.requests.map(({editor}) => editor.url)).toEqual(Array(2).fill(`${api.origin}/echo?updated=yes`))
-})
+}
+test('Save as becomes usable when a pending linked Save finishes', savePickerAfterPendingSave)
 
-test('Save as groups each collection with its root first and folders as paths', async ({extension, api}) => {
+/** Show each collection once as a selectable heading and save to a nested folder beneath it. */
+async function singleCollectionDestinationEntries({extension, api}) {
   const panel = await extension.openPanel()
   await fill(panel, '#request-url', `${api.origin}/echo`)
   await saveAs(panel, 'Root request', 'Widget API')
@@ -457,18 +460,12 @@ test('Save as groups each collection with its root first and folders as paths', 
 
   await click(panel, '#save-as')
   const picker = panel.locator('#save-collection')
-  await expect(picker.locator('optgroup')).toHaveCount(2)
-  const groups = await picker.locator('optgroup').evaluateAll((nodes) => nodes.map((group) => ({
-    label: group.label, options: Array.from(group.querySelectorAll('option'), (option) => option.textContent)
-  })))
-  expect(groups.map(({label}) => label).sort()).toEqual(['Other API', 'Widget API'])
-  const widgetGroup = groups.find(({label}) => label === 'Widget API')
-  const otherGroup = groups.find(({label}) => label === 'Other API')
-  expect(widgetGroup.options).toEqual([
-    '\u{1F4DA} Widget API (root)', folderOption('Users'), folderOption('Users', 'Admins')
+  await expect(picker.locator('optgroup')).toHaveCount(0)
+  await expect(picker.locator('option')).toHaveText([
+    '\u{1F4DA} Widget API', folderOption('Users'), folderOption('Users', 'Admins'),
+    '\u{1F4DA} Other API', '\uff0b New collection'
   ])
-  expect(otherGroup.options).toEqual(['\u{1F4DA} Other API (root)'])
-  await expect(picker.locator(':scope > option')).toHaveText(['\uff0b New collection'])
+  await expect(picker.locator('.destination-root')).toHaveText(['\u{1F4DA} Widget API', '\u{1F4DA} Other API'])
   await picker.selectOption({label: folderOption('Users', 'Admins')})
   await fill(panel, '#save-request-name', 'Admin request')
   await click(panel, '#confirm-save-as')
@@ -479,14 +476,19 @@ test('Save as groups each collection with its root first and folders as paths', 
   const admins = users.requests.find((item) => item.name === 'Admins')
   expect(admins.requests.map(({editor}) => editor.name)).toEqual(['Admin request'])
   await evidence(panel, 'save-as-grouped-destinations')
-})
+}
+test('Save as lists each collection once as a selectable heading above its folder paths', singleCollectionDestinationEntries)
 
-test('New request in the header opens a blank, unsaved request and keeps the saved one', async ({extension, api}) => {
+/** Choose No collection for a new request while preserving the saved request. */
+async function newRequestWithoutCollection({extension, api}) {
   const panel = await extension.openPanel()
   await fill(panel, '#request-url', `${api.origin}/echo?kept=yes`)
   await saveAs(panel, 'Kept request', 'Widget API')
   await expectVisible(panel, '#save-as')
   await click(panel, '#new-request')
+  await expectVisible(panel, '#new-request-dialog')
+  await chooseNewRequestDestination(panel, 'none')
+  await click(panel, '#confirm-new-request')
   await expectValue(panel, '#request-url', '')
   await expect(panel.locator('#request-url')).toBeFocused()
   await expectHidden(panel, '#request-collection')
@@ -503,4 +505,5 @@ test('New request in the header opens a blank, unsaved request and keeps the sav
   const header = panel.locator('.app-header')
   expect(await header.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true)
   await expect(panel.getByRole('button', {name: 'New request', exact: true})).toBeVisible()
-})
+}
+test('New request in the header opens a blank, unsaved request and keeps the saved one', newRequestWithoutCollection)

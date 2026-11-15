@@ -10,9 +10,9 @@ import {TestHttpServer} from './http-server.mjs'
 const EVIDENCE_VIDEO_DIR = fileURLToPath(new URL('../.factory-evidence/videos', import.meta.url))
 
 /**
- * Build the video option of the browser session.
+ * Build the video recording option of the browser session.
  *
- * @returns A Playwright `recordVideo` option when `FACTORY_EVIDENCE=1` is set, so a factory agent can record proof.
+ * @returns A Playwright recording option when `FACTORY_EVIDENCE=1` is set.
  * Otherwise an empty object, so normal test runs record nothing.
  */
 function evidenceVideoOptions() {

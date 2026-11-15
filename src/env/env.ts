@@ -156,6 +156,16 @@ export function requestEnvChain(collection: EnvLevel, requestId: string): (Level
   }
 }
 
+/** Resolve an unsaved request's selected collection or folder without borrowing any saved API's variables. */
+export function destinationEnvChain(collection: EnvLevel, folderId = collection.id): (LevelEnv | undefined)[] | undefined {
+  if (!collection.requests) return
+  if (collection.id === folderId) return [collection.env]
+  for (const item of collection.requests) {
+    const chain = destinationEnvChain(item, folderId)
+    if (chain) return [...chain, collection.env]
+  }
+}
+
 /** The empty option represents No env; callers render its label. */
 export function pickerOptions(envs: readonly (LevelEnv | undefined)[]): {name: string | null; label: string}[] {
   const names = new Set(envs.flatMap((env) => env?.forks.map(({name}) => name) ?? []))
