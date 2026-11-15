@@ -1,4 +1,5 @@
-/** The options page: read, validate, and save the response size limits. */
+/** The Settings page: configure response limits and automatic collection backups. */
+import {DiskSyncSettingsPanel} from './DiskSyncSettingsPanel'
 import {DEFAULT_SETTINGS, SETTING_RANGES, loadSettings, saveSettings} from '../settings/settings'
 import type {SizeSettings} from '../settings/settings'
 import './styles.css'
@@ -98,3 +99,4 @@ form.addEventListener('submit', handleSubmit)
 form.addEventListener('input', handleInput)
 element('#reset-settings').addEventListener('click', handleReset)
 void start()
+new DiskSyncSettingsPanel()

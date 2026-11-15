@@ -2,6 +2,7 @@
 import {createHttpRequestHandlers} from './requests/http-runner'
 import {createChromiumHeaderRuleRunner, createFirefoxHeaderRuleRunner} from './requests/header-rules'
 import {recoverInterruptedRequests} from './history/request-store'
+import {DiskSyncWorker} from './collections/disk-sync-worker'
 
 // Named one by one so the bundler can fold each build down to a single branch.
 const isFirefoxLike =
@@ -17,6 +18,7 @@ if (isFirefoxLike) {
 }
 
 if (!isFirefoxLike) {
+  new DiskSyncWorker()
   // setPanelBehavior only affects FUTURE action clicks, registering it
   // inside onClicked would swallow the first toolbar click.
   chrome.sidePanel?.setPanelBehavior({openPanelOnActionClick: true})

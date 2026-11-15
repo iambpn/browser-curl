@@ -100,6 +100,7 @@ export class CollectionsPanel {
   private statusTimer: ReturnType<typeof setTimeout> | undefined
   private disposed = false
 
+  /** Connect collection browsing, import, export, and editor save actions. */
   constructor(
     private readEditor: () => EditorState,
     private openEditor: (editor: EditorState, link: CollectionRequestLink) => void,

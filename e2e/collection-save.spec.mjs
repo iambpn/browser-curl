@@ -206,14 +206,16 @@ test('loading a collection request clears the visible response and its persisted
   await expectText(panel, '#request-name', 'First request')
 })
 
-test('sending adds history without saving edits and Back to draft restores the collection link', async ({extension, api}) => {
+/** Send retains unsaved collection edits in the draft, including across history previews and restarts. */
+async function sendKeepsCollectionDraft({extension, api}) {
   let panel = await extension.openPanel()
   await fill(panel, '#request-url', `${api.origin}/echo?saved=yes`)
   await saveAs(panel, 'Linked request', 'Widget API')
   const original = await panel.evaluate(storedCollections)
-  await fill(panel, '#request-url', `${api.origin}/echo?sent=unsaved`)
+  await fill(panel, '#request-url', `${api.origin}/echo?sent=changed`)
   await send(panel)
-  expect(await panel.evaluate(storedCollections)).toEqual(original)
+  const afterSend = await panel.evaluate(storedCollections)
+  expect(afterSend).toEqual(original)
   expect(await panel.evaluate(storedHistory)).toHaveLength(1)
   await evidence(panel, 'linked-request-sent')
   await click(panel, '#show-history')
@@ -228,12 +230,18 @@ test('sending adds history without saving edits and Back to draft restores the c
   panel = await extension.openPanel()
   await click(panel, '#back-to-draft')
   await expectText(panel, '#request-collection', 'Widget API')
-  await expectValue(panel, '#request-url', `${api.origin}/echo?sent=unsaved`)
+  await expectValue(panel, '#request-url', `${api.origin}/echo?sent=changed`)
+  expect(await panel.evaluate(storedCollections)).toEqual(original)
   await click(panel, '#save-request')
-  await expect.poll(async () => (await panel.evaluate(storedCollections)).collections[0].requests[0].editor.url)
-    .toBe(`${api.origin}/echo?sent=unsaved`)
+  /** Observe the linked collection snapshot after returning from the history preview. */
+  async function savedUrl() {
+    const saved = await panel.evaluate(storedCollections)
+    return saved.collections[0].requests[0].editor.url
+  }
+  await expect.poll(savedUrl).toBe(`${api.origin}/echo?sent=changed`)
   await evidence(panel, 'back-to-linked-draft')
-})
+}
+test('sending retains collection edits as a draft until Save, including after restart', sendKeepsCollectionDraft)
 
 for (const deleted of ['request', 'collection']) {
   test(`Save opens Save as when the linked ${deleted} was deleted`, async ({extension, api}) => {

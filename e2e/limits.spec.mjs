@@ -37,6 +37,9 @@ async function settingsButton({extension}) {
   const options = await opened
   await options.waitForURL(/\/options\/index\.html$/)
   await expect(options.locator('h1')).toHaveText('Settings')
+  await expect(options.locator('#disk-sync-title')).toHaveText('Automatic disk sync')
+  await expect(options.locator('#disk-sync-form')).not.toHaveAttribute('inert', '')
+  await expect(panel.locator('#disk-sync-form')).toHaveCount(0)
 }
 test('opens the options page from the panel', settingsButton)
 
