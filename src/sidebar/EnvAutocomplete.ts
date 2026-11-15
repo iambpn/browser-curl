@@ -13,6 +13,21 @@ function requestField(target: EventTarget | null): HTMLInputElement | HTMLTextAr
   if (target.matches('#request-url, #request-body, .entry-row input[type="text"], .auth-fields input')) return target
 }
 
+/**
+ * Check if any part of the field is still visible after a scroll.
+ * When the scrolled element contains the field, the field must overlap that element. Otherwise it must overlap the window.
+ */
+function isFieldVisible(field: Element, scrolled: EventTarget | null): boolean {
+  const scrolledAroundField = scrolled instanceof Element && scrolled.contains(field)
+  const container = scrolledAroundField ? scrolled : undefined
+  const windowArea = new DOMRect(0, 0, window.innerWidth, window.innerHeight)
+  const area = container?.getBoundingClientRect() ?? windowArea
+  const fieldRect = field.getBoundingClientRect()
+  const overlapsVertically = fieldRect.bottom > area.top && fieldRect.top < area.bottom
+  const overlapsHorizontally = fieldRect.right > area.left && fieldRect.left < area.right
+  return overlapsVertically && overlapsHorizontally
+}
+
 /** Keep typing in the field while a separate list supports pointer and keyboard selection. */
 export class EnvAutocomplete {
   private list = document.createElement('div')
@@ -238,9 +253,17 @@ export class EnvAutocomplete {
     if (event.target !== this.field && !this.list.contains(event.target)) this.close()
   }
 
-  /** Keep list scrolling usable, but dismiss when the page or a request panel moves the anchor. */
+  /**
+   * Keep the list next to its field while the page or a request panel scrolls, and close it once the field is out of view.
+   * A scroll that a field focus starts can arrive after typing begins, so an open or loading list must survive it.
+   */
   private handleScroll = (event: Event): void => {
+    if (!this.field) return
     if (event.target instanceof Node && this.list.contains(event.target)) return
-    this.close()
+    if (!isFieldVisible(this.field, event.target)) {
+      this.close()
+      return
+    }
+    if (!this.list.hidden) this.position()
   }
 }
