@@ -7,15 +7,28 @@ description: Prepare and publish browsercurl releases for Chromium and Firefox, 
 
 Run from the repository root. Use the existing cleanup and packaging commands rather than replacing their logic.
 
+## Remote gates
+
+A GitHub ruleset protects `main`. Every change reaches `main` through a pull request with passing `Unit tests`, `Browser tests`, and `E2E tests` checks.
+A second ruleset protects `v*` tags. A release tag can be created once, but it cannot be moved or deleted.
+
+Each of these actions needs its own explicit "yes" from the user in this session:
+
+1. Push the release branch and open the release pull request.
+2. Merge the release pull request.
+3. Publish the GitHub release, which creates the tag on origin.
+
+Before each gate, show the user what will happen: the branch or tag, the commit SHA, and the files or assets.
+Then stop and wait for the answer. The release request itself and earlier approvals are not confirmation for a later gate.
+
 ## Version and source
 
 - Inspect the working tree, remote branch, tags, and GitHub releases before changing files.
 - Use the requested version. If unspecified, choose the next unused patch version after the latest stable release.
-- Set the same version in `package.json` and `src/manifest.json`. Use `v<version>` for the release tag.
-- Follow the repository's Git-state rules and existing session authorization when recording the release source.
-- A new version and its built artifacts must belong to the same source commit. Do not tag an older commit to publish uncommitted changes.
-- If a needed source commit or push is not authorized, finish the local artifacts and checks before requesting that authorization.
-- Preserve unrelated working-tree and staging changes. Never force a tag update or replace an existing release without explicit instructions.
+- Create the branch `chore/release-v<version>` from the latest `origin/main`. Note the branch the user started on.
+- Set the same version in `package.json` and `src/manifest.json`. Commit only these two files on the release branch. Use `v<version>` for the release tag.
+- A new version and its built artifacts must belong to the same source commit. Build and test from the committed release branch.
+- Preserve unrelated working-tree and staging changes. Keep every published tag where it is. Replace an existing release only on explicit instructions.
 
 ## Clean and build
 
@@ -67,20 +80,31 @@ Check the CRX3 signature and embedded build files. Confirm the signing key and e
 Write `dist/releases/SHA256SUMS.txt` with SHA-256 hashes of the four packages, using their filenames without directory prefixes.
 Verify the checksum file from inside `dist/releases/`.
 
-## Publish and verify
+## Merge the release pull request
 
-Record only authorized source changes in the release commit and push that commit before creating the release tag.
-Confirm the working tree used for the builds matches that commit.
+Confirm the working tree used for the builds matches the release branch commit.
+Ask for gate 1. Then push the branch and open a pull request into `main` with `gh pr create`.
+
+Wait until the three required checks pass. If a check fails, stop and investigate before you continue.
+Ask for gate 2. Then merge with `gh pr merge <number> --squash`.
+
+Get the merged commit with `gh pr view <number> --json mergeCommit --jq .mergeCommit.oid`. This commit is the release source commit.
+Fetch `origin/main` and compare trees: `git rev-parse <branch-commit>^{tree}` must equal `git rev-parse <source-commit>^{tree}`.
+If the trees differ, check out the source commit, then repeat the clean, build, test, and package steps from there.
+
+## Publish and verify
 
 Write release notes to a file. Include user-visible changes, source commit, package meanings, test results, and verification limits.
 Label the Firefox XPI as unsigned and the Chromium CRX as self-signed. Neither package has browser-store approval.
 
-Publish with `gh release create` using the selected tag, the exact source SHA in `--target`, and `--notes-file`.
+Ask for gate 3. Then publish with `gh release create` using the selected tag, the source commit SHA in `--target`, and `--notes-file`.
 Attach the four explicit package paths and `SHA256SUMS.txt`. Do not upload a whole directory or use a broad file wildcard.
 
 If publication fails or returns an uncertain result, inspect the remote release and tag before retrying.
 Continue only with missing steps. Stop for user input if a remote state conflict would require replacing published content.
+A wrong tag stays on origin because of the tag ruleset. Report it to the user and stop.
 
 Verify that the tag resolves to the source commit, the release has the intended visibility, and every asset finished uploading.
 Compare GitHub's asset digests with local checksums. If digests are unavailable, download the uploaded assets and verify them locally.
-Report the release URL, download links, source commit, skill location, and any checks not run.
+Switch back to the branch the user started on.
+Report the release URL, pull request URL, download links, source commit, skill location, and any checks not run.
