@@ -200,3 +200,48 @@ async function deleteCollection() {
   await chrome.storage.local.remove('browsercurl.collection.shop')
 }
 test('suggestions fit a narrow sidebar and preserve multiline text and dynamically added rows', narrowSidebarWorkflow)
+
+/** Check that the list moves with its field while the request editor scrolls, and closes once the field leaves the editor. */
+async function scrollWorkflow({extension}) {
+  const panel = await openApi(extension)
+  await panel.setViewportSize({width: 360, height: 720})
+  const list = panel.getByRole('listbox', {name: 'Environment variables'})
+  const section = panel.locator('#request-section')
+  await panel.locator('#headers-tab').click()
+  for (let index = 0; index < 12; index++) await panel.locator('[data-add="headers"]').click()
+  await section.evaluate(scrollToTop)
+  const header = panel.locator('#headers-rows [data-field="value"]').first()
+  await header.fill('{{fol')
+  await expect(list).toBeVisible()
+  const offsetBefore = await listOffset(panel)
+  await section.evaluate(scrollDown, 30)
+  /** Read the offset again after the scroll event moves the list. */
+  async function currentOffset() { return listOffset(panel) }
+  await expect.poll(currentOffset).toBeCloseTo(offsetBefore, 0)
+  await expect(list).toBeVisible()
+  await section.evaluate(scrollToBottom)
+  await expect(list).toBeHidden()
+  await expect(header).toHaveValue('{{fol')
+}
+
+/** Return the distance from the focused field's top edge to the list's top edge. */
+async function listOffset(panel) {
+  return panel.evaluate(readListOffset)
+}
+
+/** Measure the list position against the focused field inside the panel page. */
+function readListOffset() {
+  const fieldTop = document.activeElement.getBoundingClientRect().top
+  const listTop = document.querySelector('#env-suggestions').getBoundingClientRect().top
+  return listTop - fieldTop
+}
+
+/** Scroll the element to its top. */
+function scrollToTop(element) { element.scrollTop = 0 }
+
+/** Scroll the element down by the given number of pixels. */
+function scrollDown(element, pixels) { element.scrollTop += pixels }
+
+/** Scroll the element to its bottom. */
+function scrollToBottom(element) { element.scrollTop = element.scrollHeight }
+test('the list follows its field while the request editor scrolls and closes when the field leaves it', scrollWorkflow)

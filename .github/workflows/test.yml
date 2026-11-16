@@ -1,0 +1,62 @@
+# Run every test suite on pull requests to main and after each merge into main.
+# The ruleset on main requires the three job names below to pass before a merge.
+name: Tests
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Cancel an older run of the same pull request or branch when a new commit arrives.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Run the Node unit tests in tests/.
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+
+  # Build the extension and run the panel in the runner's Google Chrome with simulated extension APIs.
+  browser:
+    name: Browser tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run test:browser
+
+  # Build the extension and run the Playwright suite in e2e/ against the real extension in headless Chromium.
+  e2e:
+    name: E2E tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Install Chromium and its system libraries. The e2e global setup skips its own install when Chromium exists.
+      - run: pnpm exec playwright install --with-deps --no-shell chromium
+      - run: pnpm run test:e2e
