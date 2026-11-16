@@ -218,3 +218,20 @@ async function visibleCredentials({extension}) {
   await expect(panel.locator('input[type="password"]')).toHaveCount(0)
 }
 test('shows credentials as plain text in every auth type', visibleCredentials)
+
+/** Link the sidebar and settings footers to the project repository in a new tab. */
+async function projectLinks({extension}) {
+  const repositoryUrl = 'https://github.com/iambpn/browser-curl'
+  const panel = await extension.openPanel()
+  const settings = await extension.openOptions()
+  for (const page of [panel, settings]) {
+    const link = page.locator('footer .project-link')
+    await expect(link).toBeVisible()
+    await expect(link).toHaveAttribute('href', repositoryUrl)
+    await expect(link).toHaveAttribute('target', '_blank')
+    await expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+    await expect(link).toHaveAccessibleName('browsercurl on GitHub')
+    await expect(link.locator('svg')).toBeVisible()
+  }
+}
+test('links the sidebar and settings footers to the GitHub repository', projectLinks)

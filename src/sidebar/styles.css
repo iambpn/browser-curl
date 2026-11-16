@@ -1574,7 +1574,7 @@ h2 {
 footer {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 10px;
   padding: 12px 20px;
   border-top: 1px solid var(--line);
@@ -1582,6 +1582,15 @@ footer {
   color: var(--muted);
   background: var(--surface);
   flex-shrink: 0;
+}
+
+.project-link {
+  display: inline-flex;
+  color: inherit;
+}
+
+.project-link:hover {
+  color: var(--accent);
 }
 
 kbd {

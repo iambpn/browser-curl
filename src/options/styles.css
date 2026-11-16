@@ -206,6 +206,21 @@ h1 {
   color: var(--accent);
 }
 
+.settings-footer {
+  margin-top: 28px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.project-link {
+  display: inline-flex;
+  color: var(--muted);
+}
+
+.project-link:hover {
+  color: var(--accent);
+}
+
 .settings-status {
   min-height: 1.5em;
   margin-top: 12px;
