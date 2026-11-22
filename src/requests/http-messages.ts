@@ -58,7 +58,9 @@ export type HttpControlMessage =
 /**
  * Use response for a complete HTTP response, and error for a failed or canceled send.
  * storageError reports a result that the background could not persist.
+ * sentHeaders holds the request headers that the browser reported as sent, with lowercase names.
+ * It is missing when the browser reported none, such as for a request that failed before it was sent.
  */
 export type HttpResultMessage =
-  | {type: 'response'; response: HttpResponsePayload; storageError?: string}
-  | {type: 'error'; message: string; storageError?: string}
+  | {type: 'response'; response: HttpResponsePayload; storageError?: string; sentHeaders?: HeaderPair[]}
+  | {type: 'error'; message: string; storageError?: string; sentHeaders?: HeaderPair[]}

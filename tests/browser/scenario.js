@@ -160,6 +160,12 @@ window.chrome = {
     async getSessionRules() { return [] },
     /** Accept the production background's temporary header rules. */
     async updateSessionRules() {}
+  },
+  webRequest: {
+    onSendHeaders: {
+      /** Accept the production background's sent-header listener. The simulated network reports no headers. */
+      addListener() {}
+    }
   }
 }
 
