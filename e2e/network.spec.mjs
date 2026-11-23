@@ -1,7 +1,8 @@
 /** Exercise the real background fetch, browser header rules, and response viewer against a loopback service. */
 import {test, expect} from './fixtures.mjs'
 import {
-  addEntry, click, echoedRequest, expectText, expectVisible, fill, send, sessionRules, storedHistory
+  addEntry, click, clipboardText, echoedRequest, expectHidden, expectText, expectVisible, fill, send,
+  sessionRules, storedHistory
 } from './panel-helpers.mjs'
 
 /** Verify the wire request, including browser-controlled headers and the absence of an automatic Origin header. */
@@ -35,6 +36,77 @@ async function actualRequest({extension, api}) {
 }
 test('sends a real request with its method, body, duplicate parameters, and headers', actualRequest)
 
+/** Browser callback for page.evaluate(): return the User-Agent that this browser reports to pages. */
+function browserUserAgent() {
+  return navigator.userAgent
+}
+
+/** Headers that Chromium sends but does not report to extensions, so the Request tab cannot show them. */
+const UNREPORTED_HEADERS = new Set(['host', 'connection', 'content-length', 'pragma', 'cache-control'])
+
+/**
+ * Build the Request tab text from the headers that the test server received, in the order received.
+ * Header names are lowercase. Headers that Chromium does not report are left out.
+ */
+function logFromReceived(requestLine, received, body) {
+  const lines = [requestLine, '']
+  const raw = received.rawHeaders
+  for (let index = 0; index < raw.length; index += 2) {
+    const name = raw[index].toLowerCase()
+    if (!UNREPORTED_HEADERS.has(name)) lines.push(`${name}: ${raw[index + 1]}`)
+  }
+  if (body) lines.push('', body)
+  return lines.join('\n')
+}
+
+/**
+ * Show the headers that the browser sent in the Request tab, matched against what the server received.
+ * They include the browser's User-Agent and headers the browser adds, such as Accept-Language.
+ * Reopening the request from history shows the same log.
+ */
+async function requestLog({extension, api}) {
+  const panel = await extension.openPanel()
+  await fill(panel, '#request-url', `${api.origin}/echo?tag=one`)
+  await panel.locator('#request-method').selectOption('POST')
+  await click(panel, '#body-tab')
+  await fill(panel, '#request-body', '{"log":true}')
+  await addEntry(panel, 'headers', 'X-Test', 'logged')
+  await addEntry(panel, 'headers', 'Host', 'invalid.example.test')
+  await click(panel, '#auth-tab')
+  await fill(panel, '#bearer-token', 'log-token')
+  await send(panel)
+
+  const received = await echoedRequest(panel)
+  const userAgent = await panel.evaluate(browserUserAgent)
+  expect(received.headers['user-agent']).toBe(userAgent)
+  const expectedLog = logFromReceived(`POST ${api.origin}/echo?tag=one`, received, '{"log":true}')
+  expect(expectedLog).toContain('authorization: Bearer log-token')
+  expect(expectedLog).toContain(`user-agent: ${userAgent}`)
+  expect(expectedLog).toContain('accept-language: ')
+  expect(expectedLog).toContain('accept-encoding: ')
+  expect(expectedLog).toContain('sec-fetch-mode: cors')
+
+  await click(panel, '#response-request-tab')
+  await expectVisible(panel, '#response-request-panel')
+  await expectHidden(panel, '#response-content')
+  await expectHidden(panel, '#response-format')
+  await expectText(panel, '#response-request-panel', expectedLog)
+  await extension.context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  await click(panel, '#copy-response')
+  await expectText(panel, '#copy-response-label', 'Copied')
+  const copied = await panel.evaluate(clipboardText)
+  expect(copied).toBe(expectedLog)
+
+  await click(panel, '#clear-request')
+  await expectHidden(panel, '#response-request-panel')
+  await click(panel, '#show-history')
+  await click(panel, '[data-open-history]')
+  await expectVisible(panel, '#response-stats')
+  await click(panel, '#response-request-tab')
+  await expectText(panel, '#response-request-panel', expectedLog)
+}
+test('shows the headers that the browser sent, including its User-Agent, in the Request tab', requestLog)
+
 /** Verify the locked headers at the server, rather than only checking how the extension classifies them. */
 async function lockedHeaders({extension, api}) {
   const panel = await extension.openPanel()
@@ -63,6 +135,14 @@ async function lockedHeaders({extension, api}) {
   const note = panel.locator('#response-note')
   await expect(note).toContainText('Host')
   await expect(note).toContainText('Content-Length')
+  await click(panel, '#response-request-tab')
+  const log = panel.locator('#response-request-panel')
+  await expect(log).toContainText('user-agent: browsercurl-e2e/1')
+  await expect(log).toContainText('cookie: session=test; theme=dark')
+  await expect(log).toContainText('origin: https://origin.example.test')
+  await expect(log).toContainText('referer: https://referrer.example.test/from')
+  await expect(log).not.toContainText('host:')
+  await expect(log).not.toContainText('content-length:')
 }
 test('applies locked headers with real browser rules and preserves browser-owned headers', lockedHeaders)
 
@@ -92,7 +172,10 @@ async function responseKinds({extension, api}) {
 }
 test('renders real HTTP errors, final redirect URLs, and decompressed bodies', responseKinds)
 
-/** Save actual network failures and recover with a successful send using the same panel. */
+/**
+ * Save actual network failures and show the sent request in the Request tab, which is the only tab without a response.
+ * Reopening the failure from history shows the same Request tab, and a later successful send shows every tab again.
+ */
 async function networkFailure({extension, api}) {
   const panel = await extension.openPanel()
   await fill(panel, '#request-url', `${api.origin}/disconnect`)
@@ -102,10 +185,39 @@ async function networkFailure({extension, api}) {
   const saved = await panel.evaluate(storedHistory)
   expect(saved).toHaveLength(1)
   expect(saved[0].result.type).toBe('error')
+
+  const userAgent = await panel.evaluate(browserUserAgent)
+  expect(api.requests).toHaveLength(1)
+  const expectedLog = logFromReceived(`GET ${api.origin}/disconnect`, api.requests[0])
+  expect(expectedLog).toContain(`user-agent: ${userAgent}`)
+  await expectText(panel, '#response-note', 'No response received.')
+  await expectHidden(panel, '#response-empty')
+  await expectHidden(panel, '#response-body-tab')
+  await expectHidden(panel, '#response-headers-tab')
+  await expectHidden(panel, '#response-format')
+  await expect(panel.locator('#response-request-tab')).toHaveAttribute('aria-selected', 'true')
+  await expectText(panel, '#response-request-panel', expectedLog)
+  await extension.context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  await click(panel, '#copy-response')
+  await expectText(panel, '#copy-response-label', 'Copied')
+  const copied = await panel.evaluate(clipboardText)
+  expect(copied).toBe(expectedLog)
+
+  await click(panel, '#clear-request')
+  await expectHidden(panel, '#response-request-panel')
+  await click(panel, '#show-history')
+  await click(panel, '[data-open-history]')
+  await expectVisible(panel, '#request-error')
+  await expectText(panel, '#response-request-panel', expectedLog)
+
   await fill(panel, '#request-url', `${api.origin}/echo`)
   await send(panel)
+  await expectVisible(panel, '#response-body-tab')
+  await expectVisible(panel, '#response-headers-tab')
+  await expectVisible(panel, '#response-content')
+  await expectHidden(panel, '#response-request-panel')
 }
-test('saves a live network failure and allows a later successful request', networkFailure)
+test('saves a live network failure, shows its sent request, and allows a later successful request', networkFailure)
 
 /** Send every authorization type through the actual form and verify the exact server-received credentials. */
 async function authorizationTypes({extension, api}) {

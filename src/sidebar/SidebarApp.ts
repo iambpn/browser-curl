@@ -2,6 +2,7 @@
 import {controlSavedRequest, sendThroughBackground} from '../requests/background-client'
 import type {CurlImport} from '../requests/curl-import'
 import {buildRequest} from '../requests/request'
+import {formatRequestLog} from '../requests/request-log'
 import {editorUrlParts, encodeEditorParameter} from '../requests/editor-url'
 import {formatResponse, formatSize} from '../responses/format-response'
 import type {RequestAuthorization, RequestDraft, RequestEntry} from '../requests/request-types'
@@ -167,6 +168,12 @@ class SidebarApp {
   private emptyTitle = element('#empty-title')
   private emptyDescription = element('#empty-description')
   private responseHeadersPanel = element<HTMLPreElement>('#response-headers-panel')
+  /** The Request tab's text panel, which shows the sent request for the displayed response or failure. */
+  private responseRequestPanel = element<HTMLPreElement>('#response-request-panel')
+  /** The Body tab button. It is hidden for a failed send, because no response body exists. */
+  private responseBodyTab = element<HTMLButtonElement>('#response-body-tab')
+  /** The Headers tab button. It is hidden for a failed send, because no response headers exist. */
+  private responseHeadersTab = element<HTMLButtonElement>('#response-headers-tab')
   private authFields = new Map<string, HTMLInputElement | HTMLSelectElement>()
   /** IDs of requests that this panel sent. The panel shows their results from the request port, not from storage. */
   private sentRequestIds = new Set<string>()
@@ -207,6 +214,8 @@ class SidebarApp {
   private responseBody = ''
   private prettyBody: string | undefined
   private responseHeaders = ''
+  /** The Request tab text for the displayed response: what was sent, including the browser's User-Agent. */
+  private requestLog = ''
   private responseTab = 'body'
   private lastUrlSearch = ''
 
@@ -374,13 +383,16 @@ class SidebarApp {
     } else {
       this.runningId = undefined
       this.setLoading(false)
-      this.showResult(saved.result)
+      this.showResult(saved.result, saved.request)
     }
     this.updateWorkspaceLabel()
   }
 
-  /** Display response text or a saved failure using the same view as a newly sent request. */
-  private showResult(result: HttpResultMessage): void {
+  /**
+   * Display response text or a saved failure using the same view as a newly sent request.
+   * request is the sent request that the Request tab describes. A failure shows only the Request tab.
+   */
+  private showResult(result: HttpResultMessage, request: HttpRequestPayload): void {
     if (result.type === 'response') {
       const response = result.response
       this.response = response
@@ -395,15 +407,30 @@ class SidebarApp {
       this.responseEmpty.hidden = true
       this.responseTools.hidden = false
       this.responseHeadersPanel.textContent = this.responseHeaders || '(no response headers)'
+      this.showRequestLog(request, result.sentHeaders)
       this.renderResponseBody()
       this.showResponseTab()
     } else {
       this.resetResponse()
       this.showError(result.message)
-      this.emptyTitle.textContent = 'No response received'
-      this.emptyDescription.textContent = result.message
+      this.responseNote.textContent = 'No response received.'
+      this.responseNote.hidden = false
+      this.responseEmpty.hidden = true
+      this.responseTools.hidden = false
+      this.showRequestLog(request, result.sentHeaders)
+      this.showResponseTab()
     }
     if (result.storageError) this.showStorageError(result.storageError)
+  }
+
+  /**
+   * Describe the sent request in the Request tab.
+   * sentHeaders are the headers that the browser reported as sent. Without them, the tab shows the editor headers
+   * and the browser's User-Agent.
+   */
+  private showRequestLog(request: HttpRequestPayload, sentHeaders: HeaderPair[] | undefined): void {
+    this.requestLog = formatRequestLog(request, navigator.userAgent, sentHeaders)
+    this.responseRequestPanel.textContent = this.requestLog
   }
 
   /** Clear response data, loading indicators, and old errors without touching the editor or history. */
@@ -414,6 +441,7 @@ class SidebarApp {
     this.responseBody = ''
     this.prettyBody = undefined
     this.responseHeaders = ''
+    this.requestLog = ''
     this.error.hidden = true
     this.responseStats.hidden = true
     this.responseNote.hidden = true
@@ -422,6 +450,8 @@ class SidebarApp {
     this.responseContent.hidden = true
     this.responseHeadersPanel.textContent = ''
     this.responseHeadersPanel.hidden = true
+    this.responseRequestPanel.textContent = ''
+    this.responseRequestPanel.hidden = true
     this.responseEmpty.hidden = false
     this.emptyTitle.textContent = 'Ready when you are'
     this.emptyDescription.textContent = 'Enter a URL or paste a cURL command, then select Send.'
@@ -989,7 +1019,7 @@ class SidebarApp {
     }
   }
 
-  /** Support arrow, Home, and End keys for both sets of tabs. */
+  /** Support arrow, Home, and End keys for every set of tabs. Hidden tabs are skipped. */
   private handleTabKey = (event: KeyboardEvent): void => {
     const target = event.target as HTMLElement
     if (target.getAttribute('role') !== 'tab') return
@@ -998,7 +1028,7 @@ class SidebarApp {
     event.preventDefault()
     const list = target.closest('[role="tablist"]')!
     const buttons = list.querySelectorAll<HTMLButtonElement>('[role="tab"]')
-    const tabs = Array.from(buttons)
+    const tabs = Array.from(buttons).filter((tab) => !tab.hidden)
     let index = tabs.indexOf(target as HTMLButtonElement)
     if (event.key === 'ArrowLeft') {
       index -= 1
@@ -1277,7 +1307,7 @@ class SidebarApp {
       if (existingDestination) sentEditor.collectionDestination = existingDestination
       const result = await sendThroughBackground(payload, sentEditor, id)
       if (this.disposed || this.responseId !== id) return
-      this.showResult(result)
+      this.showResult(result, payload)
     } catch (error) {
       if (this.disposed || (id && this.responseId !== id)) return
       let message = 'Could not send the request. Check the URL and network connection.'
@@ -1354,12 +1384,13 @@ class SidebarApp {
     this.responseTools.hidden = true
     this.responseContent.hidden = true
     this.responseHeadersPanel.hidden = true
+    this.responseRequestPanel.hidden = true
     this.responseEmpty.hidden = false
     this.emptyTitle.textContent = 'Sending request…'
     this.emptyDescription.textContent = 'Waiting for the server to respond.'
   }
 
-  /** Switch between response body and response headers. */
+  /** Switch between the response body, the response headers, and the sent request. */
   private handleResponseTab = (event: MouseEvent): void => {
     const target = event.target as HTMLElement
     const tab = target.closest<HTMLButtonElement>('[role="tab"]')
@@ -1369,11 +1400,28 @@ class SidebarApp {
     this.showResponseTab()
   }
 
-  /** Show the selected response panel. The panels keep their text, so switching tabs does not render again. */
+  /**
+   * Return the response tab to show: the selected tab for a response, or the Request tab for a failed send.
+   * A failed send keeps the selected tab, so the next response opens in that tab again.
+   */
+  private displayedResponseTab(): string {
+    return this.response ? this.responseTab : 'request'
+  }
+
+  /**
+   * Show the displayed response tab and its panel. The panels keep their text, so switching tabs does not render again.
+   * The Body and Headers tabs are hidden while a failed send is shown.
+   */
   private showResponseTab(): void {
-    this.responseContent.hidden = this.responseTab !== 'body'
-    this.responseHeadersPanel.hidden = this.responseTab !== 'headers'
-    this.responseFormat.hidden = this.responseTab !== 'body'
+    const hasResponse = Boolean(this.response)
+    this.responseBodyTab.hidden = !hasResponse
+    this.responseHeadersTab.hidden = !hasResponse
+    const tab = this.displayedResponseTab()
+    this.selectTab(element<HTMLButtonElement>(`#response-${tab}-tab`))
+    this.responseContent.hidden = tab !== 'body'
+    this.responseHeadersPanel.hidden = tab !== 'headers'
+    this.responseRequestPanel.hidden = tab !== 'request'
+    this.responseFormat.hidden = tab !== 'body'
     this.copyLabel.textContent = 'Copy'
   }
 
@@ -1391,9 +1439,17 @@ class SidebarApp {
     this.copyLabel.textContent = 'Copy'
   }
 
+  /** Return the text of the selected tab: the response headers, the sent request, or the formatted body. */
+  private visibleResponseText(): string {
+    const tab = this.displayedResponseTab()
+    if (tab === 'headers') return this.responseHeaders
+    if (tab === 'request') return this.requestLog
+    return this.formattedBody()
+  }
+
   /** Copy the visible response text and report clipboard failures in the button. */
   private copyResponse = async (): Promise<void> => {
-    const text = this.responseTab === 'headers' ? this.responseHeaders : this.formattedBody()
+    const text = this.visibleResponseText()
     try {
       await navigator.clipboard.writeText(text)
       this.copyLabel.textContent = 'Copied'

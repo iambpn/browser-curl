@@ -2,7 +2,7 @@
 
 A REST API client in the browser sidebar for Chromium and Firefox. Send HTTP requests, import cURL commands, and inspect responses without leaving your browser.
 
-[Get browsercurl for Firefox](https://addons.mozilla.org/en-US/firefox/addon/browsercurl/)
+[Get browsercurl for Chrome](https://chromewebstore.google.com/detail/epkhipffedmlolhnklnmmhbdmbljbnng) · [Get browsercurl for Firefox](https://addons.mozilla.org/en-US/firefox/addon/browsercurl/)
 
 ## Screenshots
 
@@ -25,9 +25,21 @@ A REST API client in the browser sidebar for Chromium and Firefox. Send HTTP req
 - **Background requests:** Keep requests running after the panel closes. Reopen the panel to view the result or cancel a running request.
 - **Collections:** Save and reopen named requests in collections and nested folders. Import Postman Collection v2.0 or v2.1 JSON files and export v2.1 files, including supported authorization and disabled rows. Export asks you to confirm that the file contains saved credentials. Import warnings list dropped scripts, descriptions, saved examples, protocol settings, and unsupported body or auth types. Collection and folder authorization is copied into requests. Other unrecognized fields are dropped. Define base variable names with the **Environments** action on a collection, folder, or saved request, create forks such as `local` and `staging` with values, and choose one in the request heading. The chosen env applies to the whole collection and lists fork names from every level. Sending replaces `{{name}}` using that fork on the request, then its folders from inner to outer, then the collection; empty values fall through, and missing values block the send. Export writes only the base names at each level, with empty values; forks and their values stay on this device. Import sets up these base names and puts any enabled, nonempty values in an `imported` fork at each level, choosing `imported` for the collection when any such fork is created; otherwise it chooses **No env**.
 - **Drafts and history:** Restore unfinished drafts and browse the latest 100 sent requests, including their responses or failures.
-- **Response viewer:** Inspect status, headers, size, and duration. Switch between raw text and formatted JSON, then copy the result.
+- **Response viewer:** Inspect status, headers, size, and duration. Switch between raw text and formatted JSON, then copy the result. The **Request** tab shows the method, URL, headers, and body that were sent. The headers come from the browser, so they include headers that the browser adds, such as User-Agent, Accept-Language, and Accept-Encoding. The browser does not report Host, Connection, Content-Length, Pragma, and Cache-Control, so the tab does not show them. When a send fails, such as for a timeout or a connection error, the Request tab is the only tab shown.
 - **Panel controls:** Resize the response area and send requests with **Ctrl+Enter** or **Command+Enter**.
 - **Size settings:** Limit response downloads and choose which response bodies history saves.
+
+## Install from the Chrome Web Store
+
+browsercurl is available on the Chrome Web Store:
+
+1. Open [browsercurl on the Chrome Web Store](https://chromewebstore.google.com/detail/epkhipffedmlolhnklnmmhbdmbljbnng).
+2. Select **Add to Chrome**.
+3. Review the permissions and confirm the installation.
+4. Open Chrome's extensions menu and pin **browsercurl** for easy access.
+5. Select the browsercurl toolbar icon to open the sidebar.
+
+Chrome updates the extension automatically.
 
 ## Install from Firefox Add-ons
 
@@ -42,7 +54,7 @@ Firefox updates the add-on automatically.
 
 ## Install release packages
 
-Use these packages for Chrome, or for Firefox development and testing.
+Use these packages for Chrome or Firefox development and testing. For normal use, install from the [Chrome Web Store](#install-from-the-chrome-web-store) or [Firefox Add-ons](#install-from-firefox-add-ons).
 Download the package for your browser from [GitHub Releases](https://github.com/iambpn/browser-curl/releases).
 ZIP files contain unpacked builds. Firefox `-unsigned.xpi` files have no Mozilla signature. Chrome `-self-signed.crx` files use a local signing key.
 
@@ -70,7 +82,7 @@ On Linux, Chrome permits manual installation of locally signed CRX packages:
 4. Review the permissions and confirm the installation if Chrome allows it.
 
 Standard Chrome on Windows and macOS restricts installation outside the Chrome Web Store to enterprise-managed environments.
-Use the ZIP instructions above for local development on those platforms.
+Use the [Chrome Web Store version](https://chromewebstore.google.com/detail/epkhipffedmlolhnklnmmhbdmbljbnng) on those platforms, or the ZIP instructions above for local development.
 A self-signed CRX is not Chrome Web Store signed. See [Chrome's distribution rules](https://developer.chrome.com/docs/extensions/how-to/distribute).
 
 ### Firefox
@@ -146,6 +158,7 @@ HTTP/HTTPS access lets the extension send requests without web page CORS restric
 The extension does not inject content scripts.
 
 Chromium network rules and Firefox's blocking `webRequest` listener set request headers. The browser controls Host, Content-Length, and Connection.
+The `webRequest` permission lets the extension read the headers that the browser sends for its own requests, for the **Request** tab. In Chromium, this permission only observes requests and cannot change them.
 The extension removes the browser's Origin header unless you set one.
 
 ## Development

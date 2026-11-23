@@ -3,7 +3,7 @@
  * The extension has host access, so the browser does not apply CORS checks to these requests.
  */
 import {sortRequestHeaders} from './locked-headers.ts'
-import type {HeaderRuleRunner} from './header-rules'
+import type {HeaderRuleRunner, SentHeadersRecorder} from './header-rules'
 import {HTTP_REQUEST_PORT, REQUEST_TIMEOUT_MS} from './http-messages.ts'
 import {createSavedRequest, deleteSavedRequest, finishSavedRequest} from '../history/request-store.ts'
 import {resolveRequestName} from '../history/request-state.ts'
@@ -69,11 +69,15 @@ async function readLimitedBody(
   }
 }
 
-/** Send one request with the locked headers applied, and read at most maxBytes of the response body. */
+/**
+ * Send one request with the locked headers applied, and read at most maxBytes of the response body.
+ * recordSentHeaders receives the request headers that the browser reports as sent.
+ */
 async function sendHttpRequest(
   request: HttpRequestPayload,
   signal: AbortSignal,
   runWithHeaderRules: HeaderRuleRunner,
+  recordSentHeaders: SentHeadersRecorder,
   maxBytes: number
 ): Promise<HttpResponsePayload> {
   const url = new URL(request.url)
@@ -95,7 +99,7 @@ async function sendHttpRequest(
     })
   }
 
-  const response = await runWithHeaderRules(url, sortedHeaders.ruleHeaders, startFetch)
+  const response = await runWithHeaderRules(url, sortedHeaders.ruleHeaders, startFetch, recordSentHeaders)
   const {bytes, isTruncated} = await readLimitedBody(response, maxBytes)
   const elapsed = performance.now() - startedAt
   const headers: HeaderPair[] = []
@@ -256,6 +260,12 @@ export function createHttpRequestHandlers(
         return
       }
 
+      let sentHeaders: HeaderPair[] | undefined
+      /** Keep the first header list that the browser reports. A redirect reports the next request's headers later. */
+      function recordSentHeaders(headers: HeaderPair[]): void {
+        sentHeaders ??= headers
+      }
+
       const timeout = setTimeout(abortTimedOutRequest, REQUEST_TIMEOUT_MS)
       const keepAlive = setInterval(keepRequestAlive, 10000)
       let result: HttpResultMessage
@@ -264,6 +274,7 @@ export function createHttpRequestHandlers(
           message.request,
           controller.signal,
           runWithHeaderRules,
+          recordSentHeaders,
           maxResponseBytes
         )
         result = {type: 'response', response}
@@ -276,6 +287,7 @@ export function createHttpRequestHandlers(
         clearInterval(keepAlive)
         controllers.delete(message.id)
       }
+      if (sentHeaders) result.sentHeaders = sentHeaders
 
       try {
         const savedResult = historyResult(result, historyLimitBytes)
