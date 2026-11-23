@@ -1,17 +1,15 @@
-# Run every test suite on pull requests to main and after each merge into main.
+# Run every test suite on pull requests to main.
 # The ruleset on main requires the three job names below to pass before a merge.
 name: Tests
 
 on:
   pull_request:
     branches: [main]
-  push:
-    branches: [main]
 
 permissions:
   contents: read
 
-# Cancel an older run of the same pull request or branch when a new commit arrives.
+# Cancel an older run of the same pull request when a new commit arrives.
 concurrency:
   group: tests-${{ github.ref }}
   cancel-in-progress: true
